@@ -1,0 +1,400 @@
+package verify
+
+import (
+    "bytes"
+    "crypto/ed25519"
+    "crypto/sha256"
+    "encoding/binary"
+    "encoding/hex"
+    "errors"
+    "strconv"
+    "log"
+    "os"
+    "path/filepath"
+	"net"
+	"encoding/base32"
+	"sync"
+	"time"
+	"io"
+)
+
+var BaseDir = "kep-data"
+
+
+type ParsedMDB struct {
+    Tag     uint16
+    HashHex string
+    PointTo string
+    Raw     []byte
+}
+
+var (
+	mainkey_cache sync.Map
+	ttlMap sync.Map
+	known_keys sync.Map
+)
+
+func NewTTLMap(){
+for {
+	time.Sleep(time.Second *60*60*12)
+	var newMap sync.Map
+	var newCache sync.Map
+	ttlMap=newMap
+	mainkey_cache=newCache
+}
+}
+
+
+func readExactly(r *bytes.Reader, n int) ([]byte,error) {
+	if n <=1 {
+		return nil,errors.New("n<0")
+	}
+    buf := make([]byte, n)
+	_, err := io.ReadFull(r, buf)
+    if err != nil {
+        return nil,err;
+    }
+    return buf,nil
+}
+
+func dnsLookup(domain string) ([]byte,error) {
+	txtRecords, err := net.LookupTXT(domain)
+    if err != nil {
+        return nil,err
+    }
+	
+	for _, txt := range txtRecords {
+		if len(txt) >= 4 && txt[:4] == "kep=" {
+			decoded, err := base32.StdEncoding.DecodeString(txt[4:])
+			if err != nil {return nil,err;}
+			return decoded,nil
+		}
+    }
+	return nil,errors.New("nslookup mainkey not found.")
+}
+
+func Non_Plain_text(r io.Reader, n int) error {
+    buf := make([]byte, n)
+    _, err := io.ReadFull(r, buf)
+    if err != nil {
+        return err
+    }
+    for _, b := range buf {
+        if b < 128 {
+            if (b < 32 && b != '\n' && b != '\r' && b != '\t') || b == 127 {
+                return errors.New("Non Plain text")
+            }
+        }
+    }
+
+    return nil
+}
+
+func bytesToInt64(b []byte) int64 {
+    if len(b) != 5 {
+       return -1
+    }
+    var t uint64
+    t |= uint64(b[0]) << 32
+    t |= uint64(b[1]) << 24
+    t |= uint64(b[2]) << 16
+    t |= uint64(b[3]) << 8
+    t |= uint64(b[4])
+
+    return int64(t)
+}
+
+func parseAndVerify(data []byte) (*ParsedMDB, error) {
+    r := bytes.NewReader(data)
+
+    version,err := r.ReadByte() // version
+	if err !=nil {
+		return nil, err
+	}
+		
+	if version != 1 {
+		return nil, errors.New("unsupported version")
+	}
+	
+    hashType, err := r.ReadByte()
+	if err !=nil {
+		return nil, err
+	}
+    domainLen, err := r.ReadByte()
+	if err !=nil {
+		return nil, err
+	}
+	
+	timestamp,err:=readExactly(r, 5) //这里要检查时间窗口
+	if err !=nil {
+		return nil, err
+	}
+	
+	post_time := bytesToInt64(timestamp)
+	
+	now_time := int64(time.Now().Unix())
+	
+	offset_t:=now_time - post_time //sha256
+	
+	offset_t /= 60;
+	
+	if offset_t > 15 || offset_t < -15 {
+		return nil, errors.New("timestamp out-of-time")
+	}
+	
+	
+	newdata,err:=readExactly(r, 2)
+	if err !=nil {
+		return nil, err
+	}
+    length := binary.BigEndian.Uint16(newdata) //正文长度
+
+    mainKey,err := readExactly(r, 32)
+	if err !=nil {
+		return nil, err
+	}
+    pkey,err := readExactly(r, 32)
+	if err !=nil {
+		return nil, err
+	}
+    signKey,err := readExactly(r, 64)
+	if err !=nil {
+		return nil, err
+	}
+
+    _,err=r.ReadByte() // typeID
+	if err !=nil {
+		return nil, err
+	}
+	
+    pointLen, err := r.ReadByte()
+	if err !=nil {
+		return nil, err
+	}
+    
+	tag1,err:=readExactly(r, 2)
+	if err !=nil {
+		return nil, err
+	}
+	tagnum := binary.BigEndian.Uint16(tag1)
+
+    cp,err:=r.ReadByte() // compress
+	if err !=nil {
+		return nil, err
+	}
+	if cp !=0 {
+		return nil, errors.New("unsupported compress")
+	}
+
+	domain_str,err:=readExactly(r, int(domainLen))
+	if err !=nil {
+		return nil, err
+	}
+	var mainPub []byte
+	val,ok:=mainkey_cache.Load(string(domain_str))
+	if ok {
+		mainPub=val.([]byte)
+	} else {
+		mainPub,err=dnsLookup(string(domain_str))
+		if err !=nil {
+			return nil, err
+		}
+		mainkey_cache.Store(string(domain_str),mainPub);
+	}
+	
+    pointToRaw,err := readExactly(r, int(pointLen))
+	if err !=nil {
+		return nil, err
+	}
+	
+	err = Non_Plain_text(r,int(length))
+	
+	if err !=nil {
+		return nil, err
+	}
+
+	if len(data) < 99 {
+		return nil, errors.New("msg too short")
+	}
+    hashEnd := len(data) - (32 + 64 + 2 + 1)
+    hashData := data[:hashEnd]
+
+    var calcHash []byte
+    switch hashType {
+    case 1:
+        h := sha256.Sum256(hashData)
+        calcHash = h[:]
+    default:
+        return nil, errors.New("unsupported hash type")
+    }
+
+    tHash,err := readExactly(r, 32)
+	if err !=nil {
+		return nil, err
+	}
+    signature,err := readExactly(r, 64)
+	if err !=nil {
+		return nil, err
+	}
+	tag2,err:=readExactly(r, 2)
+	if err !=nil {
+		return nil, err
+	}
+    tag2num := binary.BigEndian.Uint16(tag2)
+	if tagnum != tag2num{
+		log.Println("Debug: tag change: tagnum != tag2num")
+	}
+	
+    ttl,err := r.ReadByte() // ttl
+	if err !=nil {
+		return nil, err
+	}
+	if ttl > 250 || ttl == 0 {
+		 return nil, errors.New("ttl err")
+	}
+	
+	_,err= r.ReadByte()
+	if err == nil {
+		//已读完
+		return nil, errors.New("msg too long")
+	}
+
+    if !bytes.Equal(mainKey, mainPub) {
+        return nil, errors.New("mainkey mismatch")
+    }
+
+    if !ed25519.Verify(mainPub, pkey, signKey) {
+        return nil, errors.New("mainkey -> pkey signature invalid")
+    }
+
+    if !bytes.Equal(calcHash, tHash) {
+        return nil, errors.New("t_hash mismatch")
+    }
+
+    if !ed25519.Verify(pkey, tHash, signature) {
+        return nil, errors.New("post signature invalid")
+    }
+	
+	_,ok=ttlMap.Load(string(tHash))
+	if ok {
+		//重复,去重
+		return nil, errors.New("msg already exist")
+	}
+	
+	ttlMap.Store(string(tHash),struct{}{})
+
+    hashHex := hex.EncodeToString(tHash)
+
+    var parent string
+    if len(pointToRaw) >4 {
+        parent = hex.EncodeToString(pointToRaw)
+		err = ensureParent(parent)
+		if err !=nil {
+			return nil, err
+		}
+    } else {
+		path := filepath.Join(
+			BaseDir,
+			"index",
+			parent+".txt",
+		)
+		f, err := os.Create(path)
+		if err == nil {
+			f.Close()
+		}
+	}
+	
+    return &ParsedMDB{
+        Tag:     tag2num,
+        HashHex: hashHex,
+        PointTo: parent,
+        Raw:     data,
+    }, nil
+}
+
+func ensureParent(parent string) error {
+	if parent=="" {
+		return nil
+	}
+	path := filepath.Join(
+        BaseDir,
+        "index",
+        parent+".txt",
+    )
+	_, err := os.Stat(path)
+    if err == nil {
+        return nil
+    }
+    return errors.New("Discard dangling pointer:"+parent)
+	
+}
+
+func ensureDir(path string) error {
+    return os.MkdirAll(path, 0755)
+}
+
+func writeMDB(p *ParsedMDB) error {
+    dir := filepath.Join(BaseDir, strconv.Itoa(int(p.Tag)))
+    if err := ensureDir(dir); err != nil {
+        return err
+    }
+
+    mdbPath := filepath.Join(dir, p.HashHex+".mdb")
+    if err := os.WriteFile(mdbPath, p.Raw, 0644); err != nil {
+        return err
+    }
+
+    idxPath := filepath.Join(BaseDir, "tag_"+strconv.Itoa(int(p.Tag))+".idx")
+
+    f, err := os.OpenFile(idxPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+    if err != nil {
+        return err
+    }
+    defer f.Close()
+
+    if _, err := f.WriteString(p.HashHex + "\n"); err != nil {
+        return err
+    }
+
+    return nil
+}
+
+func appendSubIndex(tag uint16, parent, child string) error {
+    if parent == "" {
+        return nil
+    }
+
+    path := filepath.Join(
+        BaseDir,
+        "index",
+        parent+".txt",
+    )
+
+    f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+    if err != nil {
+        return err
+    }
+    defer f.Close()
+
+    _, err = f.WriteString(child + ";")
+    return err
+}
+
+func IngestMDB(data []byte) error {
+
+    parsed, err := parseAndVerify(data)
+    if err != nil {
+        return err
+    }
+	err = writeMDB(parsed);
+    if err != nil {
+        return err
+    }
+
+    if err := appendSubIndex(parsed.Tag, parsed.PointTo, parsed.HashHex); err != nil {
+        return err
+    }
+
+    log.Println("Debug: ingested:", parsed.HashHex)
+    return nil
+}
