@@ -1,4 +1,4 @@
-module kep
+module github.com/stalltrix/kep-demo
 
 go 1.23.11
 

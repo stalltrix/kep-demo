@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 	"io"
-	"kep/ntp"
+	"github.com/stalltrix/kep-demo/ntp"
 )
 
 var BaseDir string

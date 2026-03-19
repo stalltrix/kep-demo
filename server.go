@@ -12,17 +12,17 @@ import (
     "syscall"
 	"errors"
 	"sync"
-	"kep/verify"
-	"kep/send"
-	"kep/kepresolv"
+	"github.com/stalltrix/kep-demo/verify"
+	"github.com/stalltrix/kep-demo/send"
+	"github.com/stalltrix/kep-demo/kepresolv"
 	"time"
 	"golang.org/x/net/publicsuffix"
 	"golang.org/x/time/rate"
-	"kep/config"
+	"github.com/stalltrix/kep-demo/config"
 	"encoding/hex"
 	"bytes"
 	"encoding/json"
-	"kep/ntp"
+	"github.com/stalltrix/kep-demo/ntp"
 )
 
 type tokenLimiter struct {
