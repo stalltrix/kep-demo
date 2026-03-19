@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 	"io"
+	"kep/ntp"
 )
 
-var BaseDir = "kep-data"
-
+var BaseDir string
 
 type ParsedMDB struct {
     Tag     uint16
@@ -35,6 +35,13 @@ var (
 )
 
 func NewTTLMap(){
+	exePath, err := os.Executable()
+    if err == nil {
+        BaseDir = filepath.Join(filepath.Dir(exePath), "kep-data")
+    }else{
+		 log.Println("walk database dir err:",err)
+		 BaseDir = "kep-data"
+	}
 for {
 	time.Sleep(time.Second *60*60*12)
 	var newMap sync.Map
@@ -46,8 +53,10 @@ for {
 
 
 func readExactly(r *bytes.Reader, n int) ([]byte,error) {
-	if n <=1 {
+	if n <0 {
 		return nil,errors.New("n<0")
+	}else if n == 0 {
+		return nil,nil
 	}
     buf := make([]byte, n)
 	_, err := io.ReadFull(r, buf)
@@ -64,8 +73,10 @@ func dnsLookup(domain string) ([]byte,error) {
     }
 	
 	for _, txt := range txtRecords {
+	log.Println("txt=",txt)
 		if len(txt) >= 4 && txt[:4] == "kep=" {
-			decoded, err := base32.StdEncoding.DecodeString(txt[4:])
+			encoding := base32.StdEncoding.WithPadding(base32.NoPadding)
+			decoded, err := encoding.DecodeString(txt[4:])
 			if err != nil {return nil,err;}
 			return decoded,nil
 		}
@@ -132,7 +143,7 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 	
 	post_time := bytesToInt64(timestamp)
 	
-	now_time := int64(time.Now().Unix())
+	now_time := ntp.Get_Now_Time()
 	
 	offset_t:=now_time - post_time //sha256
 	
@@ -259,6 +270,7 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 		return nil, errors.New("msg too long")
 	}
 
+    // ===== 校验 =====
     if !bytes.Equal(mainKey, mainPub) {
         return nil, errors.New("mainkey mismatch")
     }
@@ -316,6 +328,11 @@ func ensureParent(parent string) error {
 	if parent=="" {
 		return nil
 	}
+	var child string
+	if len(parent)>64{
+		child=parent[:64]
+		parent=parent[64:]
+	}
 	path := filepath.Join(
         BaseDir,
         "index",
@@ -323,7 +340,17 @@ func ensureParent(parent string) error {
     )
 	_, err := os.Stat(path)
     if err == nil {
-        return nil
+		if child == "" {
+			return nil
+		}
+        data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if bytes.Contains(data, []byte(child)) {
+			return nil
+		}
+		return errors.New("Discard dangling non-child item:"+child)
     }
     return errors.New("Discard dangling pointer:"+parent)
 	
@@ -360,8 +387,14 @@ func writeMDB(p *ParsedMDB) error {
 }
 
 func appendSubIndex(tag uint16, parent, child string) error {
-    if parent == "" {
-        return nil
+    root:=false
+	if parent == "" {
+		if child !="" {
+			parent=child
+			root=true
+		}else{
+			return nil
+		}
     }
 
     path := filepath.Join(
@@ -369,13 +402,20 @@ func appendSubIndex(tag uint16, parent, child string) error {
         "index",
         parent+".txt",
     )
+	if root {
+		f, err := os.Create(path)
+   	 	if err != nil {
+   	    	return err
+   		}
+   		f.Close()
+		return nil
+	}
 
     f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
     if err != nil {
         return err
     }
     defer f.Close()
-
     _, err = f.WriteString(child + ";")
     return err
 }

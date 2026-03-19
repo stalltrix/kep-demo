@@ -7,11 +7,13 @@ import (
     "io"
     "net/http"
     "time"
+	"golang.org/x/net/proxy"
 )
 
 var (
     requestTimeout = 5 * time.Second
 	transport *http.Transport
+	proxyAddr,socks_user,socks_pass string
 )
 
 type MsgClient struct {
@@ -20,7 +22,7 @@ type MsgClient struct {
     httpCli   *http.Client
 }
 
-func NewMsgClient(url, token string) *MsgClient {
+func NewMsgClient(url, token string) (*MsgClient,error) {
 	transport = &http.Transport{
         MaxIdleConns:        100,
         MaxIdleConnsPerHost: 10,
@@ -33,15 +35,30 @@ func NewMsgClient(url, token string) *MsgClient {
         },
         },
     }
+	
+	if proxyAddr != "" {
+		var auth *proxy.Auth
+		if len(socks_user) !=0 && len(socks_pass) !=0 {
+			auth = &proxy.Auth{
+			User:     socks_user,
+			Password: socks_pass,
+			}
+		}
+		dialer, err := proxy.SOCKS5("tcp", proxyAddr, auth, proxy.Direct)
+		if err != nil {
+			return nil,err
+		}
+		transport.Dial=dialer.Dial
+	}
 
     return &MsgClient{
         url:        url,
         authToken: token,
         httpCli: &http.Client{
-            Timeout:   requestTimeout,
-            Transport: transport,
+        Timeout:   requestTimeout,
+        Transport: transport,
         },
-    }
+    },nil
 }
 
 func (c *MsgClient) Send(msgType string, msg []byte) ([]byte, error) {
@@ -84,4 +101,4 @@ func (c *MsgClient) Close() {
     if tr, ok := c.httpCli.Transport.(*http.Transport); ok {
         tr.CloseIdleConnections()
     }
-}
+}

@@ -1,0 +1,9 @@
+{
+	"api_token": "[your token]",
+	"listen": "127.0.0.1:8080",
+	"ntp":"",
+	"socks5":"",
+	"local_token":"token0",
+	"deny_file": "deny.json",
+	"token_file": "token.json"
+}

@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"bytes"
 	"encoding/json"
+	"kep/ntp"
 )
 
 type tokenLimiter struct {
@@ -41,6 +42,7 @@ var (
 	limiterMap sync.Map
 	g_token string
 	newMsg_logger sync.Map
+	Skip_token string
 )
 
 func startLimiterCleaner() {
@@ -68,14 +70,13 @@ func getLimiter(token string) *rate.Limiter {
     }
 
     tl := &tokenLimiter{
-        limiter:  rate.NewLimiter(rate.Every(time.Minute/30), 30),
+        limiter:  rate.NewLimiter(rate.Every(time.Minute/120), 120),
         lastUsed: now,
     }
 
     actual, _ := limiterMap.LoadOrStore(token, tl)
     return actual.(*tokenLimiter).limiter
 }
-
 
 func checkToken(authHeader, ipaddr string) bool {
     if authHeader == "" {
@@ -99,39 +100,65 @@ func checkToken(authHeader, ipaddr string) bool {
         return false
     }
 
+    //log.Println("INFO: recv Msg from token:", token, ",ip:", ipaddr)
     return true
 }
 
 func checkAndVeify_kep(msg []byte,token string){
-	_,domain,_,_,_,_,t_hash,_,err:=kepresolv.Resolv(msg)
+	_,domain,_,_,_,perm,t_hash,tag,_,err:=kepresolv.Resolv(msg)
 	if err !=nil {
 		log.Println("kepresolv err:",err)
 		return
 	}
-	suffix, ok := publicsuffix.PublicSuffix(string(domain))
-	if !ok {
+	suffix, err := publicsuffix.EffectiveTLDPlusOne(string(domain))
+	if err!=nil {
 		suffix=string(domain)
 	}
 	deny_lock.RLock()
-	_,ok=deny_Map[suffix]
+	_,ok:=deny_Map[suffix]
 	deny_lock.RUnlock()
 	if ok {
 		log.Println("drop deny user msg:",string(domain))
 		return
 	}
-	log.Println("INFO: access domain %s from token %s",suffix,token)
+	_, ok = token_Map.Load(token)
+    if !ok {
+        log.Println("ERR: re-check Invalid token:", token)
+        return
+    }
+	log.Printf("INFO: access domain %s from token %s\n",suffix,token)
+	
+	if tag == 65535 {
+		//65535标签 是私信，不再转发下一跳
+		if perm !=255 {
+			//私信权限设置必须为255，否则丢弃
+			log.Println("INFO: drop private msg form",token)
+			return
+		}
+	}
+	
 	err = verify.IngestMDB(msg);
 	if err != nil {
 		log.Println("resolv msg err:",err)
 		return
 	}
-	newMsg_logger.Store(hex.EncodeToString(t_hash),struct{}{})
-	err = send.Nextmsg(msg)
+	if Skip_token != token {
+		newMsg_logger.Store(hex.EncodeToString(t_hash),struct{}{})
+	}
+	
+	if tag == 65535 {
+		if Skip_token != token {
+		log.Println("debug: get private msg form",token)
+		return
+		}
+	}
+	
+	log.Println("debug: send msg to neighbor")
+	err = send.Nextmsg(msg,token)
 	if err != nil {
 		log.Println("send msg err:",err)
 	}
 }
-
 
 func handleMsg(msgType string, body []byte,token string) ([]byte, error) {
     switch msgType {
@@ -210,25 +237,30 @@ func main() {
 		log.Fatal("Err: apiToken is null")
 	}
 	g_token = cfg.ApiToken
+	Skip_token = cfg.Skiptoken
+	go verify.NewTTLMap()
 	
-	nextroute=make([]send.NextMsg,len(cfg.Neighbors))
-	for i:= range nextroute {
-		nextroute[i].Addr=cfg.Neighbors[i].URL
-		nextroute[i].Auth=cfg.Neighbors[i].Token
-	}
-	
-	send.Send_Init(nextroute)
-	err = loadlist()
+	err = loadList(cfg.File_deny)
 	if err!=nil {
 		log.Println("load list err:",err)
 	}
-	
+	err = loadToken(cfg.File_token,cfg.Socks5)
+	if err!=nil {
+		log.Println("load token err:",err)
+	}
+	if cfg.Apiport == "" {
+		cfg.Apiport="10428"
+	}
+	if cfg.Ntp != "" {
+		ntp.Ntp_Init(cfg.Ntp)
+		log.Println("start net client:",cfg.Ntp)
+	}
 {
 	api := http.NewServeMux()
     api.HandleFunc("/local/api/interface", apiHandler)
-	log.Printf("api server listening 127.222.1.16:10428\n")
+	log.Printf("api server listening 127.222.1.16:%s\n",cfg.Apiport)
     api_svc := &http.Server{
-        Addr:         "127.222.1.16:10428",
+        Addr:         "127.222.1.16:"+cfg.Apiport,
         Handler:      api,
         ReadTimeout:  readTimeout,
         WriteTimeout: writeTimeout,
@@ -257,7 +289,7 @@ func main() {
     }
 	
 	go startLimiterCleaner()
-	go savelist();
+	go saveTask();
 	
 	if argc >2 {
 	logfile:=os.Args[2]
@@ -274,7 +306,6 @@ func main() {
             log.Fatalf("listen failed: %v", err)
         }
     }()
-	go verify.NewTTLMap()
 
     quit := make(chan os.Signal, 1)
     signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -309,33 +340,88 @@ func apiHandler(w http.ResponseWriter, r *http.Request) {
 	
 switch svc {
 case "msg":{
+	//获取最近消息
 	var buf bytes.Buffer
 	first:=false
 	buf.WriteString("[")
+	will_del := make([]string,0,32)
 	newMsg_logger.Range(func(key, value interface{}) bool {
             hash := key.(string)
 			if first {buf.WriteString(",");}else{first=true;}
 			buf.WriteString(`"`)
 			buf.WriteString(hash)
 			buf.WriteString(`"`)
-            newMsg_logger.Delete(hash)
+			will_del=append(will_del,hash)
             return true
         })
+	for _,hash := range will_del {
+		newMsg_logger.Delete(hash)
+	}
 	buf.WriteString("]")
 	w.Header().Set("Content-Type", "application/json")
     w.Write(buf.Bytes())
 }
 case "ban":{
+	suffix, err := publicsuffix.EffectiveTLDPlusOne(req)
+	if err!=nil {
+		suffix=req
+	}
     deny_lock.Lock()
-	deny_Map[req]=true
+	deny_Map[suffix]=true
 	deny_lock.Unlock()
 	w.Write([]byte("OK"))
 }
 case "unban":{
+	suffix, err := publicsuffix.EffectiveTLDPlusOne(req)
+	if err!=nil {
+		suffix=req
+	}
     deny_lock.Lock()
-	_,ok:=deny_Map[req]
-	if ok {delete(deny_Map,req);}
+	_,ok:=deny_Map[suffix]
+	if ok {delete(deny_Map,suffix);}
 	deny_lock.Unlock()
+	w.Write([]byte("OK"))
+}
+case "neighbor":{
+	key := query.Get("key")
+	if len(key)<8{
+		w.Write([]byte("key<8"))
+		return
+	}
+	url := query.Get("url")
+	if req=="set"{
+		New_Ner:=&config.Neighbor{
+			URL: url,
+			Token: key,
+		}
+		token_Map.Store(key, New_Ner)
+		send.Append(New_Ner.URL,New_Ner.Token)
+	} else if req=="del"{
+		token_Map.Delete(key)
+		send.Remove(key)
+	} else if req=="list"{
+
+    list := make([]string,0,32)
+
+    token_Map.Range(func(k, v interface{}) bool {
+        if ka, ok := k.(string); ok {
+            list = append(list, ka)
+        }
+        return true
+    })
+
+    resp := struct{
+        State string   `json:"state"`
+        Data  []string `json:"data"`
+    }{
+        State:"OK",
+        Data:list,
+    }
+
+    w.Header().Set("Content-Type","application/json")
+    json.NewEncoder(w).Encode(resp)
+    return
+}
 	w.Write([]byte("OK"))
 }
 default:{
@@ -344,8 +430,53 @@ default:{
 }
 }
 
-func loadlist() error {
-    file, err := os.Open("deny.json")
+func saveToken(filename string) error {
+    tmp := make(map[string]config.Neighbor)
+    token_Map.Range(func(k, v interface{}) bool {
+        key, ok := k.(string)
+        if ok {
+			cfg:= v.(*config.Neighbor)
+			if cfg.Token != "" {
+				tmp[key] = *cfg
+			}
+        }
+        return true
+    })
+    data, err := json.Marshal(tmp)
+    if err != nil {
+        return err
+    }
+    return os.WriteFile(filename, data, 0644)
+}
+
+func loadToken(filename,next_spcks5 string) error {
+    data, err := os.ReadFile(filename)
+    if err != nil {
+        return err
+    }
+    tmp := make(map[string]config.Neighbor)
+    if err := json.Unmarshal(data, &tmp); err != nil {
+        return err
+    }
+	{
+		Ner :=&config.Neighbor{}
+		token_Map.Store(Skip_token, Ner)
+	}
+	nextroute=make([]send.NextMsg,len(tmp))
+	i:=0
+    for k,v := range tmp {
+		val:=v
+		nextroute[i].Addr=val.URL
+		nextroute[i].Auth=val.Token
+        token_Map.Store(k, &val)
+		i++
+    }
+	send.Send_Init(nextroute,next_spcks5)
+    return nil
+}
+
+func loadList(filename string) error {
+    file, err := os.Open(filename)
     if err != nil {
         return err
     }
@@ -359,22 +490,32 @@ func loadlist() error {
 	return nil
 }
 
-func savelist() {
-for{
-	time.Sleep(time.Second * 1200)
-    file, err := os.Create("deny.json")
+func saveList(filename string) error {
+    file, err := os.Create(filename)
     if err != nil {
-		log.Println("save err:",err)
-        continue;
+		return err
     }
     encoder := json.NewEncoder(file)
-    encoder.SetIndent("", "  ")
 	deny_lock.RLock()
     err = encoder.Encode(deny_Map)
 	deny_lock.RUnlock()
 	file.Close()
     if err != nil {
-        log.Println("save err:",err)
+        return err
+    }
+	return nil
+}
+
+func saveTask(){
+for{
+	time.Sleep(time.Second * 1200)
+	err := saveList("deny.json");
+	if err != nil {
+        log.Println("save err:",err);
+    }
+	err = saveToken("token.json");
+	if err != nil {
+        log.Println("save err:",err);
     }
 }
 }

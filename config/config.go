@@ -17,8 +17,13 @@ type Config struct {
     SigKey    string     `json:"sig_key"`
     Domain    string     `json:"domain"`
 	ApiToken     string     `json:"api_token"`
+	Apiport     string     `json:"api_port"`
 	Listen    string     `json:"listen"`
-    Neighbors []Neighbor `json:"neighbors"`
+	Ntp    string     `json:"ntp"`
+	Socks5    string     `json:"socks5"`
+	Skiptoken  string     `json:"local_token"`
+	File_deny    string     `json:"deny_file"`
+	File_token    string     `json:"token_file"`
 }
 
 func Resolv(filename string) (Config,error) {
