@@ -3,17 +3,20 @@ package send
 import (
     "bytes"
     "crypto/tls"
-    "fmt"
     "io"
     "net/http"
     "time"
 	"golang.org/x/net/proxy"
+	"sync"
+	"errors"
+	"context"
+	"net"
 )
 
 var (
-    requestTimeout = 5 * time.Second
-	transport *http.Transport
+    requestTimeout = 10 * time.Second
 	proxyAddr,socks_user,socks_pass string
+	transport_Cache sync.Map
 )
 
 type MsgClient struct {
@@ -23,18 +26,25 @@ type MsgClient struct {
 }
 
 func NewMsgClient(url, token string) (*MsgClient,error) {
-	transport = &http.Transport{
+	var transport *http.Transport
+if val, ok := transport_Cache.Load(url); ok {
+    transport = val.(*http.Transport)
+} else {
+    newTr := &http.Transport{
         MaxIdleConns:        100,
-        MaxIdleConnsPerHost: 10,
+        MaxIdleConnsPerHost: 20,
         IdleConnTimeout:     90 * time.Second,
         TLSClientConfig: &tls.Config{
-        MinVersion: tls.VersionTLS13,
-        CurvePreferences: []tls.CurveID{
-            tls.X25519,
-            tls.CurveP256,
-        },
+            MinVersion: tls.VersionTLS13,
+            CurvePreferences: []tls.CurveID{
+                tls.X25519,
+                tls.CurveP256,
+            },
         },
     }
+    val, _ := transport_Cache.LoadOrStore(url, newTr)
+    transport = val.(*http.Transport)
+}
 	
 	if proxyAddr != "" {
 		var auth *proxy.Auth
@@ -77,28 +87,34 @@ func (c *MsgClient) Send(msgType string, msg []byte) ([]byte, error) {
 
     resp, err := c.httpCli.Do(req)
     if err != nil {
+		c.Close()
         return nil, err
     }
     defer resp.Body.Close()
 
     if resp.StatusCode != http.StatusOK {
-        body, _ := io.ReadAll(resp.Body)
-        return nil, fmt.Errorf(
-            "server error: status=%d body=%s",
-            resp.StatusCode,
-            string(body),
-        )
+        io.Copy(io.Discard, resp.Body)
+        return nil, errors.New("server error: status not OK")
     }
 
-    respMsg, err := io.ReadAll(resp.Body)
+    respMsg, err := io.ReadAll(io.LimitReader(resp.Body, 1 << 16))
     if err != nil {
+	if errors.Is(err, context.DeadlineExceeded) {
+        return respMsg, nil
+    }
+    if ne, ok := err.(net.Error); ok && ne.Timeout() {
+        return respMsg, nil
+    }
         return nil, err
     }
     return respMsg, nil
 }
 
 func (c *MsgClient) Close() {
-    if tr, ok := c.httpCli.Transport.(*http.Transport); ok {
-        tr.CloseIdleConnections()
-    }
+val,ok:=transport_Cache.Load(c.url)
+if ok {
+	tr := val.(*http.Transport)
+    tr.CloseIdleConnections()
+	transport_Cache.Delete(c.url)
+}
 }

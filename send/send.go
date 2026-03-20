@@ -69,7 +69,6 @@ func Nextmsg(msg []byte,self string) error {
 		continue;
 		}
 		body,err:=client.Send("data", newMsg)
-		client.Close()
 		if err !=nil {
 		log.Println("send err",err)
 		fail(nextloop[i].Addr)
