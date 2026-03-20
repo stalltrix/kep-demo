@@ -8,6 +8,7 @@ import (
 type Neighbor struct {
     URL   string `json:"url"`
     Token string `json:"token"`
+	RPM   int    `json:"rpm"`
 }
 
 type Config struct {

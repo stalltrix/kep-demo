@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/stalltrix/kep-demo/ntp"
+	"strconv"
 )
 
 type tokenLimiter struct {
@@ -60,7 +61,7 @@ func startLimiterCleaner() {
         }
 }
 
-func getLimiter(token string) *rate.Limiter {
+func getLimiter(token string,is_domain bool) *rate.Limiter {
     now := time.Now().Unix()
 
     if v, ok := limiterMap.Load(token); ok {
@@ -68,9 +69,24 @@ func getLimiter(token string) *rate.Limiter {
         tl.lastUsed = now
         return tl.limiter
     }
-
+	
+	var new_rpm *rate.Limiter
+	if !is_domain{
+	o_rpm, ok := token_Map.Load(token)
+	if ok {
+		set_rpm:=(o_rpm.(*config.Neighbor)).RPM
+		if set_rpm <= 0 {
+			set_rpm=10
+		}
+		new_rpm=rate.NewLimiter(rate.Every(time.Minute/time.Duration(set_rpm)), set_rpm)
+	} else {
+		new_rpm=rate.NewLimiter(rate.Every(time.Minute/60), 60)
+	}}else{
+		new_rpm=rate.NewLimiter(rate.Every(time.Minute/20), 20)
+	}
+	
     tl := &tokenLimiter{
-        limiter:  rate.NewLimiter(rate.Every(time.Minute/120), 120),
+        limiter:  new_rpm,
         lastUsed: now,
     }
 
@@ -94,7 +110,7 @@ func checkToken(authHeader, ipaddr string) bool {
         return false
     }
 
-    limiter := getLimiter(token)
+    limiter := getLimiter(token,false)
     if !limiter.Allow() {
         log.Println("WARN: Rate limit exceeded token:", token, ",ip:", ipaddr)
         return false
@@ -121,11 +137,13 @@ func checkAndVeify_kep(msg []byte,token string){
 		log.Println("drop deny user msg:",string(domain))
 		return
 	}
-	_, ok = token_Map.Load(token)
-    if !ok {
-        log.Println("ERR: re-check Invalid token:", token)
+	
+	limiter := getLimiter(suffix,true)
+    if !limiter.Allow() {
+        log.Println("WARN: domain Rate limit exceeded:", suffix)
         return
     }
+	
 	log.Printf("INFO: access domain %s from token %s\n",suffix,token)
 	
 	if tag == 65535 {
@@ -289,7 +307,7 @@ func main() {
     }
 	
 	go startLimiterCleaner()
-	go saveTask();
+	go saveTask(cfg.File_deny,cfg.File_token);
 	
 	if argc >2 {
 	logfile:=os.Args[2]
@@ -390,9 +408,18 @@ case "neighbor":{
 	}
 	url := query.Get("url")
 	if req=="set"{
+		rpm := query.Get("rpm")
+		rpm_num,err:=strconv.Atoi(rpm)
+		if err!=nil{
+			rpm_num=30
+		}
+		if rpm_num <=0 {
+			rpm_num=10
+		}
 		New_Ner:=&config.Neighbor{
 			URL: url,
 			Token: key,
+			RPM: rpm_num,
 		}
 		token_Map.Store(key, New_Ner)
 		send.Append(New_Ner.URL,New_Ner.Token)
@@ -506,14 +533,14 @@ func saveList(filename string) error {
 	return nil
 }
 
-func saveTask(){
+func saveTask(deny_file,token_file string){
 for{
 	time.Sleep(time.Second * 1200)
-	err := saveList("deny.json");
+	err := saveList(deny_file);
 	if err != nil {
         log.Println("save err:",err);
     }
-	err = saveToken("token.json");
+	err = saveToken(token_file);
 	if err != nil {
         log.Println("save err:",err);
     }

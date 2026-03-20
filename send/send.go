@@ -5,6 +5,8 @@ import (
 	"net"
 	"net/url"
 	"strconv"
+	"sync"
+	"time"
 )
 
 type NextMsg struct {
@@ -14,7 +16,28 @@ type NextMsg struct {
 
 var (
 	nextloop []NextMsg
+	blacklist sync.Map
+	ttl = time.Minute
 )
+
+func allow(addr string) bool {
+    v, ok := blacklist.Load(addr)
+    if !ok {
+        return true
+    }
+
+    expire := v.(time.Time)
+    if time.Now().After(expire) {
+        blacklist.Delete(addr)
+        return true
+    }
+
+    return false
+}
+
+func fail(addr string) {
+    blacklist.Store(addr, time.Now().Add(ttl))
+}
 
 func change_Packet(Msg []byte) []byte {
 	length:=len(Msg)
@@ -36,15 +59,26 @@ func Nextmsg(msg []byte,self string) error {
 		if self==nextloop[i].Auth{
 			continue;
 		}
+		if !allow(nextloop[i].Addr) {
+			log.Println("skip fail neighbor url",nextloop[i].Addr)
+			continue;
+		}
 		client,err := NewMsgClient(nextloop[i].Addr, nextloop[i].Auth)
 		if err !=nil {
 		log.Println("Client init err",err)
 		continue;
 		}
-		_,err=client.Send("data", newMsg)
+		body,err:=client.Send("data", newMsg)
 		client.Close()
 		if err !=nil {
 		log.Println("send err",err)
+		fail(nextloop[i].Addr)
+		continue;
+		}
+		if string(body)!="+OK"{
+		log.Println("send err with resp")
+		fail(nextloop[i].Addr)
+		continue;
 		}
 		log.Println("send to",nextloop[i].Addr)
 	}
