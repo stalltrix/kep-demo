@@ -271,7 +271,7 @@ func main() {
 	}
 	if cfg.Ntp != "" {
 		ntp.Ntp_Init(cfg.Ntp)
-		log.Println("start net client:",cfg.Ntp)
+		log.Println("start ntp client:",cfg.Ntp)
 	}
 {
 	api := http.NewServeMux()
