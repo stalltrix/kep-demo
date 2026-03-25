@@ -17,6 +17,7 @@ import (
 	"time"
 	"io"
 	"github.com/stalltrix/kep-demo/ntp"
+	"hash/fnv"
 )
 
 var BaseDir string
@@ -26,6 +27,12 @@ type ParsedMDB struct {
     HashHex string
     PointTo string
     Raw     []byte
+}
+
+type dnsCache struct {
+    key []byte
+	des []uint64
+	lastcache int64
 }
 
 var (
@@ -43,7 +50,7 @@ func NewTTLMap(){
 		 BaseDir = "kep-data"
 	}
 for {
-	time.Sleep(time.Second *60*60*12)
+	time.Sleep(time.Second *60*60)
 	var newMap sync.Map
 	var newCache sync.Map
 	ttlMap=newMap
@@ -66,6 +73,28 @@ func readExactly(r *bytes.Reader, n int) ([]byte,error) {
     return buf,nil
 }
 
+func desLookup(domain string) ([]uint64,error) {
+	txtRecords, err := net.LookupTXT(domain)
+    if err != nil {
+        return nil,err
+    }
+	
+	var resp []uint64
+	
+	for _, txt := range txtRecords {
+	//log.Println("txt=",txt)
+		if len(txt) >= 4 && txt[:4] == "des=" {
+			v, err := strconv.ParseUint(txt[4:], 16, 64)
+			if err != nil {continue;}
+			resp = append(resp,v)
+		}
+    }
+	if len(resp) == 0 {
+		return nil,errors.New("nslookup pkey_des not found.")
+	}
+	return resp,nil
+}
+
 func dnsLookup(domain string) ([]byte,error) {
 	txtRecords, err := net.LookupTXT(domain)
     if err != nil {
@@ -73,7 +102,7 @@ func dnsLookup(domain string) ([]byte,error) {
     }
 	
 	for _, txt := range txtRecords {
-	log.Println("txt=",txt)
+	//log.Println("txt=",txt)
 		if len(txt) >= 4 && txt[:4] == "kep=" {
 			encoding := base32.StdEncoding.WithPadding(base32.NoPadding)
 			decoded, err := encoding.DecodeString(txt[4:])
@@ -202,15 +231,20 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 		return nil, err
 	}
 	var mainPub []byte
+	var dns_cached *dnsCache
 	val,ok:=mainkey_cache.Load(string(domain_str))
 	if ok {
-		mainPub=val.([]byte)
+		dns_cached=val.(*dnsCache)
+		mainPub=dns_cached.key
 	} else {
 		mainPub,err=dnsLookup(string(domain_str))
 		if err !=nil {
 			return nil, err
 		}
-		mainkey_cache.Store(string(domain_str),mainPub);
+		dns_cached=&dnsCache{
+			key: mainPub,
+		}
+		mainkey_cache.Store(string(domain_str),dns_cached);
 	}
 	
     pointToRaw,err := readExactly(r, int(pointLen))
@@ -291,6 +325,51 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 	if ok {
 		//重复,去重
 		return nil, errors.New("msg already exist")
+	}
+	
+		
+	//验证摘要
+	h := fnv.New64a()
+    h.Write(pkey)
+	now_des:=h.Sum64()
+	if dns_cached.des==nil{
+		des_s,err:=desLookup(string(domain_str))
+		if err!=nil {
+			return nil, err
+		}
+		dns_cached.des=des_s
+		dns_cached.lastcache=now_time
+	}
+	
+	is_des_verify:=false
+	
+	for _, des_num := range dns_cached.des {
+        if des_num == now_des {
+            is_des_verify= true
+			break
+        }
+    }
+	
+	if !is_des_verify {
+		if dns_cached.lastcache+120 > now_time {
+			return nil, errors.New("pkey des not found in cache")
+		}else{
+			des_s,err:=desLookup(string(domain_str))
+			if err!=nil {
+				return nil, err
+			}
+			dns_cached.des=des_s
+			dns_cached.lastcache=now_time
+			for _, des_num := range dns_cached.des {
+				if des_num == now_des {
+					is_des_verify= true
+					break
+				}
+			}
+			if !is_des_verify {
+				return nil, errors.New("pkey des not found in renew")
+			}
+		}
 	}
 	
 	ttlMap.Store(string(tHash),struct{}{})
