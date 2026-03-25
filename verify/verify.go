@@ -165,6 +165,10 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 		return nil, err
 	}
 	
+	if domainLen == 0 {
+		return nil, errors.New("domainlen=0")
+	}
+	
 	timestamp,err:=readExactly(r, 5) //这里要检查时间窗口
 	if err !=nil {
 		return nil, err
@@ -230,6 +234,21 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 	if err !=nil {
 		return nil, err
 	}
+	
+	for i:=0; i<int(domainLen);i++ {
+        c := domain_str[i]
+        if (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') ||
+            c == '.' || c == '-' {
+            continue
+        }
+        return nil, errors.New("invalid character in domain")
+    }
+	
+	if domain_str[len(domain_str)-1] == '.' {
+        return nil, errors.New("domain must not end with '.'")
+    }
+	
 	var mainPub []byte
 	var dns_cached *dnsCache
 	val,ok:=mainkey_cache.Load(string(domain_str))
