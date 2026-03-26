@@ -18,6 +18,8 @@ import (
 	"io"
 	"github.com/stalltrix/kep-demo/ntp"
 	"hash/fnv"
+	"github.com/stalltrix/kep-demo/kepdb"
+	"github.com/stalltrix/kep-demo/kepresolv"
 )
 
 var BaseDir string
@@ -49,6 +51,7 @@ func NewTTLMap(){
 		 log.Println("walk database dir err:",err)
 		 BaseDir = "kep-data"
 	}
+	kepdb.Init_path(filepath.Dir(exePath))
 for {
 	time.Sleep(time.Second *60*60)
 	var newMap sync.Map
@@ -390,6 +393,11 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 			}
 		}
 	}
+	if tagnum >=65534 {
+		if tagnum != tag2num{
+			return nil, errors.New("tag changed, invalid")
+		}
+	}
 	
 	ttlMap.Store(string(tHash),struct{}{})
 
@@ -403,6 +411,9 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 			return nil, err
 		}
     } else {
+		if tagnum ==65534 {
+			return nil, errors.New("tag changed, invalid")
+		}
 		path := filepath.Join(
 			BaseDir,
 			"index",
@@ -411,6 +422,25 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 		f, err := os.Create(path)
 		if err == nil {
 			f.Close()
+		}
+	}
+	
+	if tagnum ==65534 {
+		child:=parent
+		if len(child)>64{
+			child=child[:64]
+		}
+		hexbyte,err:=kepdb.ReadHash(child)
+		if err!=nil{
+			return nil, err
+		}
+		_,ori_domain,_,_,_,ori_key_des,_,_,_,err:=kepresolv.Resolv(hexbyte)
+		if err!=nil{
+			return nil, err
+		}
+		key_des := binary.BigEndian.Uint64(mainPub[:8])
+		if !(bytes.Equal(ori_domain,domain_str) && (ori_key_des==key_des)){
+			return nil, errors.New("tag changed key not match")
 		}
 	}
 	

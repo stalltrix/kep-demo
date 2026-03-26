@@ -21,7 +21,7 @@ func bytesToInt64(b []byte) int64 {
 }
 
 func Resolv(data []byte) ([]byte, []byte, int64, []byte,byte,uint64,[]byte,uint16,[]byte, error) {
-    //txt数据，用户名,timestamp,point_to,Typeid,hash,tag,point_to_root(主贴)
+    //txt数据，用户名,timestamp,point_to,Typeid,key_des,hash,tag,point_to_root(主贴)
 	r := bytes.NewReader(data)
 
     const (
