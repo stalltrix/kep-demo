@@ -29,6 +29,9 @@ var cache sync.Map
 func cacheGet(key string) (interface{}, bool) {
     if v, ok := cache.Load(key); ok {
         item := v.(cacheItem)
+		if strings.HasPrefix(key,"find:"){
+			 return item.value, true
+		}
         if time.Now().Before(item.expireAt) {
             return item.value, true
         }
@@ -45,11 +48,6 @@ func cacheSet(key string, val interface{}) {
 }
 
 func ReadHash(hash string) ([]byte, error) {
-    cacheKey := "hash:" + hash
-    if v, ok := cacheGet(cacheKey); ok {
-        return v.([]byte), nil
-    }
-
     path, err := findHashFile(hash)
     if err != nil {
         return nil, err
@@ -60,7 +58,6 @@ func ReadHash(hash string) ([]byte, error) {
         return nil, err
     }
 
-    cacheSet(cacheKey, data)
     return data, nil
 }
 
@@ -146,7 +143,18 @@ func ReadSub(hash string) ([]string, error) {
 }
 
 func findHashFile(hash string) (string, error) {
-    return FindALLFile(hash + ".mdb")
+	cacheKey := "find:" + hash
+    if v, ok := cacheGet(cacheKey); ok {
+        return v.(string), nil
+    }
+	
+	files,err:=FindALLFile(hash + ".mdb")
+	if err!=nil{
+		return "",err
+	}
+	
+	cacheSet(cacheKey, files)
+	return files,nil
 }
 
 func findSubFile(hash string) (string, error) {

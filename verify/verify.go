@@ -47,11 +47,11 @@ func NewTTLMap(){
 	exePath, err := os.Executable()
     if err == nil {
         BaseDir = filepath.Join(filepath.Dir(exePath), "kep-data")
+		kepdb.Init_path(filepath.Dir(exePath))
     }else{
 		 log.Println("walk database dir err:",err)
 		 BaseDir = "kep-data"
 	}
-	kepdb.Init_path(filepath.Dir(exePath))
 for {
 	time.Sleep(time.Second *60*60)
 	var newMap sync.Map
