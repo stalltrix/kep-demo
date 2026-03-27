@@ -425,7 +425,7 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 		}
 	}
 	
-	if tagnum ==65534 {
+	if tagnum ==65534 || len(parent)>64{
 		child:=parent
 		if len(child)>64{
 			child=child[:64]
