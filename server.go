@@ -121,7 +121,7 @@ func checkToken(authHeader, ipaddr string) bool {
 }
 
 func checkAndVeify_kep(msg []byte,token string){
-	_,domain,_,_,_,perm,t_hash,tag,_,err:=kepresolv.Resolv(msg)
+	_,domain,_,_,_,perm,t_hash,tag,_,_,err:=kepresolv.Resolv(msg)
 	if err !=nil {
 		log.Println("kepresolv err:",err)
 		return

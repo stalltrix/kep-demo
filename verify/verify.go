@@ -434,7 +434,7 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 		if err!=nil{
 			return nil, err
 		}
-		_,ori_domain,_,_,_,ori_key_des,_,_,_,err:=kepresolv.Resolv(hexbyte)
+		_,ori_domain,_,_,_,ori_key_des,_,_,_,_,err:=kepresolv.Resolv(hexbyte)
 		if err!=nil{
 			return nil, err
 		}
