@@ -1,7 +1,7 @@
 package send
 
 import (
-	"log"
+	"github.com/stalltrix/kep-demo/logger"
 	"net"
 	"net/url"
 	"strconv"
@@ -18,7 +18,16 @@ var (
 	nextloop []NextMsg
 	blacklist sync.Map
 	ttl = time.Minute
+	logDebug logger.Log_TYPE
+	logInfo logger.Log_TYPE
+	logWarn logger.Log_TYPE
 )
+
+func init() {
+    logDebug.SetLevel("debug")
+	logInfo.SetLevel("info")
+	logWarn.SetLevel("warn")
+}
 
 func allow(addr string) bool {
     v, ok := blacklist.Load(addr)
@@ -60,26 +69,26 @@ func Nextmsg(msg []byte,self string) error {
 			continue;
 		}
 		if !allow(nextloop[i].Addr) {
-			log.Println("skip fail neighbor url",nextloop[i].Addr)
+			logInfo.Println("skip fail neighbor url",nextloop[i].Addr)
 			continue;
 		}
 		client,err := NewMsgClient(nextloop[i].Addr, nextloop[i].Auth)
 		if err !=nil {
-		log.Println("Client init err",err)
+		logWarn.Println("Client init err",err)
 		continue;
 		}
 		body,err:=client.Send("data", newMsg)
 		if err !=nil {
-		log.Println("send err",err)
+		logWarn.Println("send err",err)
 		fail(nextloop[i].Addr)
 		continue;
 		}
 		if string(body)!="+OK"{
-		log.Println("send err with resp")
+		logWarn.Println("send err with resp")
 		fail(nextloop[i].Addr)
 		continue;
 		}
-		log.Println("send to",nextloop[i].Addr)
+		logDebug.Println("send to",nextloop[i].Addr)
 	}
 	return nil
 }
@@ -89,7 +98,7 @@ func Send_Init(nextServer []NextMsg,socks5addr string) {
 	if socks5addr != "" {
 	u, err := url.Parse("scheme://" + socks5addr)
     if err != nil {
-		log.Println("socks5 addr err, skip", err)  
+		logWarn.Println("socks5 addr err, skip", err)  
         return
     }
 	if u.User != nil {
@@ -98,19 +107,20 @@ func Send_Init(nextServer []NextMsg,socks5addr string) {
     }
 	host, port, err := net.SplitHostPort(u.Host)
 	if err != nil {
-		log.Println("socks5 addr err, skip",err)
+		logWarn.Println("socks5 addr err, skip",err)
 		return
 	}
 	p, err := strconv.Atoi(port)
     if err != nil || p < 1 || p > 65535 {
-        log.Println("socks5: invalid port")
+        logWarn.Println("socks5: invalid port")
         return
     }
 	if host == "" {
-		log.Println("socks5: host==\"\"")
+		logWarn.Println("socks5: host==\"\"")
         return
 	}
 	proxyAddr= net.JoinHostPort(host, port)
+	logDebug.Println("set socks5:",proxyAddr)
 	}
 }
 

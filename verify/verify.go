@@ -8,7 +8,7 @@ import (
     "encoding/hex"
     "errors"
     "strconv"
-    "log"
+    "github.com/stalltrix/kep-demo/logger"
     "os"
     "path/filepath"
 	"net"
@@ -41,7 +41,16 @@ var (
 	mainkey_cache sync.Map
 	ttlMap sync.Map
 	known_keys sync.Map
+	logDebug logger.Log_TYPE
+	logInfo logger.Log_TYPE
+	logWarn logger.Log_TYPE
 )
+
+func init() {
+    logDebug.SetLevel("debug")
+	logInfo.SetLevel("info")
+	logWarn.SetLevel("warn")
+}
 
 func NewTTLMap(){
 	exePath, err := os.Executable()
@@ -49,9 +58,10 @@ func NewTTLMap(){
         BaseDir = filepath.Join(filepath.Dir(exePath), "kep-data")
 		kepdb.Init_path(filepath.Dir(exePath))
     }else{
-		 log.Println("walk database dir err:",err)
+		 logWarn.Println("walk database dir err:",err)
 		 BaseDir = "kep-data"
 	}
+	logDebug.Println("debug: set database file",BaseDir)
 for {
 	time.Sleep(time.Second *60*60)
 	var newMap sync.Map
@@ -85,7 +95,7 @@ func desLookup(domain string) ([]uint64,error) {
 	var resp []uint64
 	
 	for _, txt := range txtRecords {
-	//log.Println("txt=",txt)
+	logDebug.Println("txt=",txt)
 		if len(txt) >= 4 && txt[:4] == "des=" {
 			v, err := strconv.ParseUint(txt[4:], 16, 64)
 			if err != nil {continue;}
@@ -105,7 +115,7 @@ func dnsLookup(domain string) ([]byte,error) {
     }
 	
 	for _, txt := range txtRecords {
-	//log.Println("txt=",txt)
+	logDebug.Println("txt=",txt)
 		if len(txt) >= 4 && txt[:4] == "kep=" {
 			encoding := base32.StdEncoding.WithPadding(base32.NoPadding)
 			decoded, err := encoding.DecodeString(txt[4:])
@@ -309,7 +319,7 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 	}
     tag2num := binary.BigEndian.Uint16(tag2)
 	if tagnum != tag2num{
-		log.Println("Debug: tag change: tagnum != tag2num")
+		logWarn.Println("Debug: tag change: tagnum != tag2num")
 	}
 	
     ttl,err := r.ReadByte() // ttl
@@ -563,6 +573,6 @@ func IngestMDB(data []byte) error {
         return err
     }
 
-    log.Println("Debug: ingested:", parsed.HashHex)
+    logDebug.Println("Debug: ingested:", parsed.HashHex)
     return nil
 }

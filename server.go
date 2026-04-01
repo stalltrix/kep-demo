@@ -4,7 +4,7 @@ import (
     "context"
     "crypto/tls"
     "io"
-    "log"
+	"github.com/stalltrix/kep-demo/logger"
     "net/http"
     "os"
     "os/signal"
@@ -44,6 +44,11 @@ var (
 	g_token string
 	newMsg_logger sync.Map
 	Skip_token string
+	logDebug logger.Log_TYPE
+	logErr logger.Log_TYPE
+	logInfo logger.Log_TYPE
+	logWarn logger.Log_TYPE
+	logMust logger.Log_TYPE
 )
 
 func startLimiterCleaner() {
@@ -106,24 +111,24 @@ func checkToken(authHeader, ipaddr string) bool {
 
     _, ok := token_Map.Load(token)
     if !ok {
-        log.Println("ERR: Invalid token:", token, ",ip:", ipaddr)
+        logWarn.Println("ERR: Invalid token:", token, ",ip:", ipaddr)
         return false
     }
 
     limiter := getLimiter(token,false)
     if !limiter.Allow() {
-        log.Println("WARN: Rate limit exceeded token:", token, ",ip:", ipaddr)
+        logWarn.Println("WARN: Rate limit exceeded token:", token, ",ip:", ipaddr)
         return false
     }
 
-    //log.Println("INFO: recv Msg from token:", token, ",ip:", ipaddr)
+    logDebug.Println("INFO: recv Msg from token:", token, ",ip:", ipaddr)
     return true
 }
 
 func checkAndVeify_kep(msg []byte,token string){
 	_,domain,_,_,_,perm,t_hash,tag,_,_,err:=kepresolv.Resolv(msg)
 	if err !=nil {
-		log.Println("kepresolv err:",err)
+		logWarn.Println("kepresolv err:",err)
 		return
 	}
 	suffix, err := publicsuffix.EffectiveTLDPlusOne(string(domain))
@@ -134,30 +139,30 @@ func checkAndVeify_kep(msg []byte,token string){
 	_,ok:=deny_Map[suffix]
 	deny_lock.RUnlock()
 	if ok {
-		log.Println("drop deny user msg:",string(domain))
+		logWarn.Println("drop deny user msg:",string(domain))
 		return
 	}
 	
 	limiter := getLimiter(suffix,true)
     if !limiter.Allow() {
-        log.Println("WARN: domain Rate limit exceeded:", suffix)
+        logWarn.Println("WARN: domain Rate limit exceeded:", suffix)
         return
     }
 	
-	log.Printf("INFO: access domain %s from token %s\n",suffix,token)
+	logMust.Printf("INFO: access domain %s from token %s\n",suffix,token)
 	
 	if tag == 65535 {
 		//65535标签 是私信，不再转发下一跳
 		if perm !=255 {
 			//私信权限设置必须为255，否则丢弃
-			log.Println("INFO: drop private msg form",token)
+			logWarn.Println("INFO: drop private msg form",token)
 			return
 		}
 	}
 	
 	err = verify.IngestMDB(msg);
 	if err != nil {
-		log.Println("resolv msg err:",err)
+		logErr.Println("resolv msg err:",err)
 		return
 	}
 	if Skip_token != token {
@@ -165,16 +170,16 @@ func checkAndVeify_kep(msg []byte,token string){
 	}
 	
 	if tag == 65535 {
+		logDebug.Println("debug: get private msg form",token)
 		if Skip_token != token {
-		log.Println("debug: get private msg form",token)
 		return
 		}
 	}
 	
-	log.Println("debug: send msg to neighbor")
+	logDebug.Println("debug: send msg to neighbor")
 	err = send.Nextmsg(msg,token)
 	if err != nil {
-		log.Println("send msg err:",err)
+		logWarn.Println("send msg err:",err)
 	}
 }
 
@@ -223,7 +228,7 @@ func msgHandler(w http.ResponseWriter, r *http.Request) {
 	token := strings.TrimPrefix(auth, "Bearer ")
     respMsg, err := handleMsg(msgType, body,token)
     if err != nil {
-		log.Println("Rrr msg",err.Error())
+		logInfo.Println("Rrr msg",err.Error())
         http.Error(w, "Msg Error", http.StatusBadRequest)
         return
     }
@@ -235,8 +240,8 @@ func msgHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	argc:=len(os.Args)
 	if argc <=1 {
-		log.Println("usage:")
-		log.Println("\tkepserver [config.json] [logfile]")
+		logger.Print("usage:")
+		logger.Print("\tkepserver [config.json] [logfile]")
 		return
 	}
 	cfg_file:=os.Args[1]
@@ -244,15 +249,22 @@ func main() {
 	
 	cfg,err := config.Resolv(cfg_file)
 	if err!=nil {
-		log.Fatal("can't read config.json")
+		logger.Fatal("can't read config.json")
 	}
 	
+	logger.SYS_Level(cfg.LogLevel)
+	logDebug.SetLevel("debug")
+	logInfo.SetLevel("info")
+	logWarn.SetLevel("warn")
+	logErr.SetLevel("err")
+	logMust.SetLevel("must")
+	
 	if cfg.Listen == "" {
-	log.Fatal("Listen addr is null")
+	logger.Fatal("Listen addr is null")
 	}
 	
 	if len(cfg.ApiToken) < 8 {
-		log.Fatal("Err: apiToken is null")
+		logger.Fatal("Err: apiToken is null")
 	}
 	g_token = cfg.ApiToken
 	Skip_token = cfg.Skiptoken
@@ -260,23 +272,23 @@ func main() {
 	
 	err = loadList(cfg.File_deny)
 	if err!=nil {
-		log.Println("load list err:",err)
+		logErr.Println("load list err:",err)
 	}
 	err = loadToken(cfg.File_token,cfg.Socks5)
 	if err!=nil {
-		log.Println("load token err:",err)
+		logErr.Println("load token err:",err)
 	}
 	if cfg.Apiport == "" {
 		cfg.Apiport="10428"
 	}
 	if cfg.Ntp != "" {
 		ntp.Ntp_Init(cfg.Ntp)
-		log.Println("start ntp client:",cfg.Ntp)
+		logWarn.Println("start ntp client:",cfg.Ntp)
 	}
 {
 	api := http.NewServeMux()
     api.HandleFunc("/local/api/interface", apiHandler)
-	log.Printf("api server listening 127.222.1.16:%s\n",cfg.Apiport)
+	logWarn.Printf("api server listening 127.222.1.16:%s\n",cfg.Apiport)
     api_svc := &http.Server{
         Addr:         "127.222.1.16:"+cfg.Apiport,
         Handler:      api,
@@ -286,7 +298,7 @@ func main() {
     }
 	go func() {
         if err := api_svc.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-            log.Fatalf("api listen failed: %v", err)
+            logger.Fatalf("api listen failed: %v", err)
         }
     }()
 }
@@ -294,7 +306,7 @@ func main() {
     mux := http.NewServeMux()
     mux.HandleFunc("/v1/messages", msgHandler)
 	
-	log.Printf("HTTPS server listen on %s\n", cfg.Listen)
+	logWarn.Printf("HTTPS server listen on %s\n", cfg.Listen)
     server := &http.Server{
         Addr:         cfg.Listen,
         Handler:      mux,
@@ -313,15 +325,15 @@ func main() {
 	logfile:=os.Args[2]
 	logpath,err :=os.OpenFile(logfile,os.O_WRONLY|os.O_CREATE|os.O_APPEND,0644)
 	if err != nil {
-		log.Println(err)
+		logErr.Println(err)
 		return
 	}
-	log.SetOutput(logpath)
+	logger.SetOutput(logpath)
 	}
 
     go func() {
         if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-            log.Fatalf("listen failed: %v", err)
+            logger.Fatalf("listen failed: %v", err)
         }
     }()
 
@@ -329,15 +341,15 @@ func main() {
     signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
     <-quit
 
-    log.Println("shutting down server...")
+    logMust.Println("shutting down server...")
 
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
     defer cancel()
     if err := server.Shutdown(ctx); err != nil {
-        log.Fatalf("server shutdown failed: %v", err)
+        logger.Fatalf("server shutdown failed: %v", err)
     }
 
-    log.Println("server exited")
+    logMust.Println("server exited")
 }
 
 
@@ -538,11 +550,11 @@ for{
 	time.Sleep(time.Second * 1200)
 	err := saveList(deny_file);
 	if err != nil {
-        log.Println("save err:",err);
+        logWarn.Println("save err:",err);
     }
 	err = saveToken(token_file);
 	if err != nil {
-        log.Println("save err:",err);
+        logWarn.Println("save err:",err);
     }
 }
 }

@@ -12,16 +12,12 @@ type Neighbor struct {
 }
 
 type Config struct {
-    MainKey   string     `json:"mainkey"`
-    PubKey    string     `json:"pub_key"`
-    PrivKey   string     `json:"priv_key"`
-    SigKey    string     `json:"sig_key"`
-    Domain    string     `json:"domain"`
 	ApiToken     string     `json:"api_token"`
 	Apiport     string     `json:"api_port"`
 	Listen    string     `json:"listen"`
 	Ntp    string     `json:"ntp"`
 	Socks5    string     `json:"socks5"`
+	LogLevel string      `json:"log_level"`
 	Skiptoken  string     `json:"local_token"`
 	File_deny    string     `json:"deny_file"`
 	File_token    string     `json:"token_file"`

@@ -6,12 +6,17 @@ import (
 	"time"
 	"io"
 	"errors"
-	"log"
+	"github.com/stalltrix/kep-demo/logger"
 )   
 
 const ntpEpochOffset = 2208988800   
 var offsetTime int64
 var ntp_server string
+var log logger.Log_TYPE
+
+func init() {
+	log.SetLevel("info")
+}
 
 func getNTPTime() (time.Time, error) {
  conn, err := net.DialTimeout("udp", ntp_server,15*time.Second)
