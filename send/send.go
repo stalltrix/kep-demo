@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"errors"
 )
 
 type NextMsg struct {
@@ -64,6 +65,7 @@ func Nextmsg(msg []byte,self string) error {
 	if newMsg == nil {
 		return nil
 	}
+	success:=0
 	for i:=range nextloop {
 		if self==nextloop[i].Auth{
 			continue;
@@ -89,6 +91,10 @@ func Nextmsg(msg []byte,self string) error {
 		continue;
 		}
 		logDebug.Println("send to",nextloop[i].Addr)
+		success++
+	}
+	if success == 0 {
+		return errors.New("success=0")
 	}
 	return nil
 }

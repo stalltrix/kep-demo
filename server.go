@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"github.com/stalltrix/kep-demo/ntp"
 	"strconv"
+	"github.com/stalltrix/kep-demo/kepdb"
 )
 
 type tokenLimiter struct {
@@ -447,6 +448,23 @@ case "unban":{
 	_,ok:=deny_Map[suffix]
 	if ok {delete(deny_Map,suffix);}
 	deny_lock.Unlock()
+	w.Write([]byte("OK"))
+}
+case "resend":{
+	if len(req) != 64 {
+		w.Write([]byte("hash len err"))
+		return
+	}
+	msg,err:=kepdb.ReadHash(req)
+	if err!=nil{
+		w.Write([]byte("read data err:"+err.Error()))
+		return
+	}
+	err = send.Nextmsg(msg,Skip_token)
+	if err != nil {
+		w.Write([]byte("resend data fail:"+err.Error()))
+		return
+	}
 	w.Write([]byte("OK"))
 }
 case "neighbor":{
