@@ -33,9 +33,9 @@ type tokenLimiter struct {
 
 var (
     maxBodySize  = int64(1 << 17) // 128K
-    readTimeout  = 5 * time.Second
-    writeTimeout = 5 * time.Second
-    idleTimeout  = 60 * time.Second
+    readTimeout  = 60 * time.Second
+    writeTimeout = 60 * time.Second
+    idleTimeout  = 1800 * time.Second
 	token_Map sync.Map
 	nextroute []send.NextMsg
 	deny_Map map[string]bool
@@ -49,6 +49,8 @@ var (
 	logInfo logger.Log_TYPE
 	logWarn logger.Log_TYPE
 	logMust logger.Log_TYPE
+	custom_page404 []byte
+	custom_pageidx []byte
 )
 
 func startLimiterCleaner() {
@@ -149,7 +151,7 @@ func checkAndVeify_kep(msg []byte,token string){
         return
     }
 	
-	logMust.Printf("INFO: access domain %s from token %s\n",suffix,token)
+	logMust.Printf("INFO: access domain %s from token %s, msgTag=%d\n",suffix,token,tag)
 	
 	if tag == 65535 {
 		//65535标签 是私信，不再转发下一跳
@@ -237,6 +239,19 @@ func msgHandler(w http.ResponseWriter, r *http.Request) {
     w.Write(respMsg)
 }
 
+func idxHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/" && len(custom_pageidx)!=0 {
+		w.Write(custom_pageidx)
+		return
+	}
+	if len(custom_page404)!=0 {
+		w.WriteHeader(404)
+		w.Write(custom_page404)
+		return
+	}
+	http.NotFound(w, r)
+}
+
 func main() {
 	argc:=len(os.Args)
 	if argc <=1 {
@@ -285,6 +300,20 @@ func main() {
 		ntp.Ntp_Init(cfg.Ntp)
 		logWarn.Println("start ntp client:",cfg.Ntp)
 	}
+	if cfg.Custom404 != "" {
+		custom_page404, err = os.ReadFile(cfg.Custom404)
+		if err != nil {
+			logger.Fatalln("Err: can't read custom file404:",err)
+		}
+		logWarn.Println("init: set custom 404 page",cfg.Custom404)
+	}
+	if cfg.CustomIdx != "" {
+		custom_pageidx, err = os.ReadFile(cfg.CustomIdx)
+		if err != nil {
+			logger.Fatalln("Err: can't read custom fileIdx:",err)
+		}
+		logWarn.Println("init: set custom index page",cfg.CustomIdx)
+	}
 {
 	api := http.NewServeMux()
     api.HandleFunc("/local/api/interface", apiHandler)
@@ -297,7 +326,7 @@ func main() {
         IdleTimeout:  idleTimeout,
     }
 	go func() {
-        if err := api_svc.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+        if err := api_svc.ListenAndServe(); err != nil {
             logger.Fatalf("api listen failed: %v", err)
         }
     }()
@@ -305,8 +334,8 @@ func main() {
 	
     mux := http.NewServeMux()
     mux.HandleFunc("/v1/messages", msgHandler)
+	mux.HandleFunc("/", idxHandler)
 	
-	logWarn.Printf("HTTPS server listen on %s\n", cfg.Listen)
     server := &http.Server{
         Addr:         cfg.Listen,
         Handler:      mux,
@@ -332,9 +361,17 @@ func main() {
 	}
 
     go func() {
+	  if cfg.Crt !="" && cfg.Key !=""{
+		logWarn.Printf("HTTPS server listen on %s\n", cfg.Listen)
+        if err := server.ListenAndServeTLS(cfg.Crt,cfg.Key); err != nil && err != http.ErrServerClosed {
+            logger.Fatalf("listen failed: %v", err)
+		}
+	  } else {
+		logWarn.Printf("HTTP server listen on %s\n", cfg.Listen)
         if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
             logger.Fatalf("listen failed: %v", err)
-        }
+		}
+	  }
     }()
 
     quit := make(chan os.Signal, 1)

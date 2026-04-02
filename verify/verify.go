@@ -452,6 +452,9 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 		if !(bytes.Equal(ori_domain,domain_str) && (ori_key_des==key_des)){
 			return nil, errors.New("tag changed key not match")
 		}
+		if tagnum != 65534{
+			return nil, errors.New("tag num is invalid")
+		}
 	}
 	
     return &ParsedMDB{

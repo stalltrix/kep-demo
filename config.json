@@ -6,5 +6,9 @@
 	"log_level":"info",
 	"local_token":"token0",
 	"deny_file": "deny.json",
-	"token_file": "token.json"
+	"token_file": "token.json",
+	"custom_fileIdx": "",
+	"custom_file404": "",
+	"crt": "",
+	"key": ""
 }

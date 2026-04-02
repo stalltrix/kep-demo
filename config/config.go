@@ -21,6 +21,10 @@ type Config struct {
 	Skiptoken  string     `json:"local_token"`
 	File_deny    string     `json:"deny_file"`
 	File_token    string     `json:"token_file"`
+	Custom404   string     `json:"custom_file404"`
+	CustomIdx   string     `json:"custom_fileIdx"`
+	Crt  string     `json:"crt"`
+	Key  string     `json:"key"`
 }
 
 func Resolv(filename string) (Config,error) {
