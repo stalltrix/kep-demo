@@ -268,6 +268,10 @@ func main() {
 		logger.Fatal("can't read config.json")
 	}
 	
+	if cfg.LogLevel == "" {
+		cfg.LogLevel="info"
+	}
+	
 	logger.SYS_Level(cfg.LogLevel)
 	logDebug.SetLevel("debug")
 	logInfo.SetLevel("info")
