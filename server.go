@@ -129,11 +129,22 @@ func checkToken(authHeader, ipaddr string) bool {
 }
 
 func checkAndVeify_kep(msg []byte,token string){
-	_,domain,_,_,_,perm,t_hash,tag,_,_,err:=kepresolv.Resolv(msg)
+	dat,err:=kepresolv.Resolv(msg)
 	if err !=nil {
 		logWarn.Println("kepresolv err:",err)
 		return
 	}
+	domain:=dat.Adomain
+	tag:=dat.Atag
+	perm:=dat.Aperm
+	t_hash:=dat.Athash
+	if len(dat.Apoint_to)>4{
+		if tag !=0 && tag !=65534 {
+			logWarn.Println("Invalid tag msg:",string(domain))
+			return
+		}
+	}
+	
 	suffix, err := publicsuffix.EffectiveTLDPlusOne(string(domain))
 	if err!=nil {
 		suffix=string(domain)

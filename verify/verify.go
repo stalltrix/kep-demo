@@ -444,10 +444,12 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
 		if err!=nil{
 			return nil, err
 		}
-		_,ori_domain,_,_,_,ori_key_des,_,_,_,_,err:=kepresolv.Resolv(hexbyte)
+		dat,err:=kepresolv.Resolv(hexbyte)
 		if err!=nil{
 			return nil, err
 		}
+		ori_domain:=dat.Adomain
+		ori_key_des:=dat.Akey_des
 		key_des := binary.BigEndian.Uint64(mainPub[:8])
 		if !(bytes.Equal(ori_domain,domain_str) && (ori_key_des==key_des)){
 			return nil, errors.New("tag changed key not match")
