@@ -13,11 +13,11 @@ import (
 	"io"
 	"encoding/hex"
 	"github.com/stalltrix/kep-demo/logger"
+	"github.com/stalltrix/kep-demo/pbb"
 )
 
 var (
     BaseDir   = "kep-data"
-    CacheTTL  = 5 * time.Minute
     MaxTagNum = 512
 	log logger.Log_TYPE
 	is_init bool
@@ -25,7 +25,7 @@ var (
 
 type cacheItem struct {
     value    interface{}
-    expireAt time.Time
+    ori_key  string
 }
 
 type cacheIdx struct {
@@ -34,53 +34,31 @@ type cacheIdx struct {
 }
 
 var (
-	cache sync.Map
+	cache *pbb.Cache
 	usedTags []int
 	path_log map[uint16]*cacheIdx
 	prefixMap sync.Map
 )
 
-func clean_ttl(){
-for{
-	time.Sleep(time.Hour*8)
-	will_del_data:=make([]string,0,16)
-	now:=time.Now()
-	cache.Range(func(k, v interface{}) bool {
-		key:=k.(string)
-		val := v.(cacheItem)
-		if now.After(val.expireAt.Add(6 * time.Hour)) {
-			will_del_data=append(will_del_data,key)
-		}
-		return true
-	})
-	for _,key:=range will_del_data {
-		cache.Delete(key)
-	}
-	will_del_data=nil
-}
-}
-
 func cacheGet(key string) (interface{}, bool) {
-    if v, ok := cache.Load(key); ok {
-        item := v.(cacheItem)
-		if len(key) > 5 && key[:5] == "find:" {
-			if time.Now().Before(item.expireAt.Add(time.Hour)) {
-				return item.value, true
-			}
-		}else{
-        if time.Now().Before(item.expireAt) {
-            return item.value, true
-        }
-		}
-        cache.Delete(key)
+    v, ok := cache.Load(key)
+    if !ok {
+        return nil, false
+    }
+    item, ok := v.(*cacheItem)
+    if !ok {
+        return nil, false
+    }
+    if item.ori_key == key {
+        return item.value, true
     }
     return nil, false
 }
 
 func cacheSet(key string, val interface{}) {
-    cache.Store(key, cacheItem{
-        value:    val,
-        expireAt: time.Now().Add(CacheTTL),
+    cache.Store(key, &cacheItem{
+        value:   val,
+        ori_key: key,
     })
 }
 
@@ -99,11 +77,6 @@ func ReadHash(hash string) ([]byte, error) {
 }
 
 func ReadTag(tag int) ([]string, error) {
-    cacheKey := "tag:" + strconv.Itoa(tag)
-    if v, ok := cacheGet(cacheKey); ok {
-        return v.([]string), nil
-    }
-
     idxPath := filepath.Join(BaseDir, "tag_"+strconv.Itoa(tag)+".idx")
 
     f, err := os.Open(idxPath)
@@ -145,17 +118,10 @@ func ReadTag(tag int) ([]string, error) {
         hash := string(buf[start : start+64])
         result = append(result, hash)
     }
-
-    cacheSet(cacheKey, result)
     return result, nil
 }
 
 func ReadSub(hash string) ([]string, error) {
-    cacheKey := "sub:" + hash
-    if v, ok := cacheGet(cacheKey); ok {
-        return v.([]string), nil
-    }
-
     txtPath, err := findSubFile(hash)
     if err != nil {
         return nil, err
@@ -174,14 +140,11 @@ func ReadSub(hash string) ([]string, error) {
             subs = append(subs, s)
         }
     }
-
-    cacheSet(cacheKey, subs)
     return subs, nil
 }
 
 func findHashFile(hash string) (string, error) {
-	cacheKey := "find:" + hash
-    if v, ok := cacheGet(cacheKey); ok {
+    if v, ok := cacheGet(hash); ok {
         return v.(string), nil
     }
 	
@@ -190,7 +153,7 @@ func findHashFile(hash string) (string, error) {
 		return "",err
 	}
 	
-	cacheSet(cacheKey, files)
+	cacheSet(hash, files)
 	return files,nil
 }
 
@@ -347,8 +310,8 @@ func index_Init(){
 
 func init(){
 	log.SetLevel("info")
-	go clean_ttl()
 	go check_init()
+	cache=pbb.NewMap() 
 }
 
 func check_init(){

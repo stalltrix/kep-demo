@@ -19,8 +19,8 @@ import (
 	"golang.org/x/net/publicsuffix"
 	"golang.org/x/time/rate"
 	"github.com/stalltrix/kep-demo/config"
-	"encoding/hex"
-	"bytes"
+	//"encoding/hex"
+	//"bytes"
 	"encoding/json"
 	"github.com/stalltrix/kep-demo/ntp"
 	"strconv"
@@ -43,7 +43,6 @@ var (
 	deny_lock sync.RWMutex
 	limiterMap sync.Map
 	g_token string
-	newMsg_logger sync.Map
 	Skip_token string
 	logDebug logger.Log_TYPE
 	logErr logger.Log_TYPE
@@ -137,7 +136,6 @@ func checkAndVeify_kep(msg []byte,token string){
 	domain:=dat.Adomain
 	tag:=dat.Atag
 	perm:=dat.Aperm
-	t_hash:=dat.Athash
 	if len(dat.Apoint_to)>4{
 		if tag !=0 && tag !=65534 {
 			logWarn.Println("Invalid tag msg:",string(domain))
@@ -178,9 +176,6 @@ func checkAndVeify_kep(msg []byte,token string){
 	if err != nil {
 		logErr.Println("resolv msg err:",err)
 		return
-	}
-	if Skip_token != token {
-		newMsg_logger.Store(hex.EncodeToString(t_hash),struct{}{})
 	}
 	
 	if tag == 65535 {
@@ -422,28 +417,6 @@ func apiHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	
 switch svc {
-case "msg":{
-	//获取最近消息
-	var buf bytes.Buffer
-	first:=false
-	buf.WriteString("[")
-	will_del := make([]string,0,32)
-	newMsg_logger.Range(func(key, value interface{}) bool {
-            hash := key.(string)
-			if first {buf.WriteString(",");}else{first=true;}
-			buf.WriteString(`"`)
-			buf.WriteString(hash)
-			buf.WriteString(`"`)
-			will_del=append(will_del,hash)
-            return true
-        })
-	for _,hash := range will_del {
-		newMsg_logger.Delete(hash)
-	}
-	buf.WriteString("]")
-	w.Header().Set("Content-Type", "application/json")
-    w.Write(buf.Bytes())
-}
 case "ban":{
 	suffix, err := publicsuffix.EffectiveTLDPlusOne(req)
 	if err!=nil {
@@ -511,10 +484,13 @@ case "neighbor":{
 	} else if req=="list"{
 
     list := make([]string,0,32)
+	list_url := make([]string,0,32)
 
     token_Map.Range(func(k, v interface{}) bool {
         if ka, ok := k.(string); ok {
             list = append(list, ka)
+			cfg:= v.(*config.Neighbor)
+			list_url = append(list_url,cfg.URL)
         }
         return true
     })
@@ -522,9 +498,11 @@ case "neighbor":{
     resp := struct{
         State string   `json:"state"`
         Data  []string `json:"data"`
+		Url []string `json:"url"`
     }{
         State:"OK",
         Data:list,
+		Url:list_url,
     }
 
     w.Header().Set("Content-Type","application/json")
