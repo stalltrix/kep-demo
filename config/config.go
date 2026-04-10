@@ -23,6 +23,7 @@ type Config struct {
 	File_token    string     `json:"token_file"`
 	Custom404   string     `json:"custom_file404"`
 	CustomIdx   string     `json:"custom_fileIdx"`
+	Archive     string     `json:"archive"`
 	Crt  string     `json:"crt"`
 	Key  string     `json:"key"`
 }

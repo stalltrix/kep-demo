@@ -49,6 +49,7 @@ var (
 	logInfo logger.Log_TYPE
 	logWarn logger.Log_TYPE
 	logMust logger.Log_TYPE
+	logArchive logger.Log_TYPE
 	custom_page404 []byte
 	custom_pageidx []byte
 )
@@ -161,7 +162,7 @@ func checkAndVeify_kep(msg []byte,token string){
         return
     }
 	
-	logMust.Printf("INFO: access domain %s from token %s, msgTag=%d\n",suffix,token,tag)
+	logArchive.Printf("INFO: access domain %s from token %s, msgTag=%d\n",suffix,token,tag)
 	
 	if tag == 65535 {
 		//65535标签 是私信，不再转发下一跳
@@ -188,7 +189,7 @@ func checkAndVeify_kep(msg []byte,token string){
 	logDebug.Println("debug: send msg to neighbor")
 	err = send.Nextmsg(msg,token)
 	if err != nil {
-		logWarn.Println("send msg err:",err)
+		logDebug.Println("send msg err:",err)
 	}
 }
 
@@ -284,6 +285,10 @@ func main() {
 	logWarn.SetLevel("warn")
 	logErr.SetLevel("err")
 	logMust.SetLevel("must")
+	logArchive.SetLevel("archive")
+	if cfg.Archive != "" {
+	logger.SetArchive(cfg.Archive)
+	}
 	
 	if cfg.Listen == "" {
 	logger.Fatal("Listen addr is null")

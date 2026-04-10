@@ -44,12 +44,21 @@ var (
 	logDebug logger.Log_TYPE
 	logInfo logger.Log_TYPE
 	logWarn logger.Log_TYPE
+	idxMap map[uint16]*os.File
+	idxLock sync.RWMutex
+	maxTag uint16
 )
 
 func init() {
     logDebug.SetLevel("debug")
 	logInfo.SetLevel("info")
 	logWarn.SetLevel("warn")
+	idxMap = make(map[uint16]*os.File)
+	maxTag=11
+}
+
+func SetMaxTag(tag uint16){
+	maxTag=tag
 }
 
 func NewTTLMap(){
@@ -353,6 +362,12 @@ func parseAndVerify(data []byte) (*ParsedMDB, error) {
         return nil, errors.New("post signature invalid")
     }
 	
+	if tagnum < 65534 {
+		if tag2num > maxTag || tagnum>maxTag {
+			return nil, errors.New("out of tag range")
+		}
+	}
+	
 	_,ok=ttlMap.Load(string(tHash))
 	if ok {
 		//重复,去重
@@ -515,15 +530,32 @@ func writeMDB(p *ParsedMDB) error {
     }
 
     idxPath := filepath.Join(BaseDir, "tag_"+strconv.Itoa(int(p.Tag))+".idx")
-
+	
+	idxLock.RLock()
+	f,ok:=idxMap[p.Tag]
+	idxLock.RUnlock()
+	if !ok {
     f, err := os.OpenFile(idxPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
     if err != nil {
         return err
     }
-    defer f.Close()
+	idxLock.Lock()
+	nf,ok:=idxMap[p.Tag]
+	if ok {
+		f.Close()
+		f=nf
+	} else {
+		idxMap[p.Tag]=f
+	}
+	idxLock.Unlock()
+	}
 
     if _, err := f.WriteString(p.HashHex + "\n"); err != nil {
-        return err
+        idxLock.Lock()
+		delete(idxMap,p.Tag)
+		idxLock.Unlock()
+		f.Close()
+		return err
     }
 
     return nil

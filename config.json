@@ -9,6 +9,7 @@
 	"token_file": "token.json",
 	"custom_fileIdx": "",
 	"custom_file404": "",
+	"archive": "",
 	"crt": "",
 	"key": ""
 }
