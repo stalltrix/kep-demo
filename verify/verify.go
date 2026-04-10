@@ -535,17 +535,18 @@ func writeMDB(p *ParsedMDB) error {
 	f,ok:=idxMap[p.Tag]
 	idxLock.RUnlock()
 	if !ok {
-    f, err := os.OpenFile(idxPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+    f1, err := os.OpenFile(idxPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
     if err != nil {
         return err
     }
 	idxLock.Lock()
-	nf,ok:=idxMap[p.Tag]
+	f2,ok:=idxMap[p.Tag]
 	if ok {
-		f.Close()
-		f=nf
+		f1.Close()
+		f=f2
 	} else {
-		idxMap[p.Tag]=f
+		idxMap[p.Tag]=f1
+		f=f1
 	}
 	idxLock.Unlock()
 	}
