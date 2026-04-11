@@ -47,6 +47,7 @@ var (
 	idxMap map[uint16]*os.File
 	idxLock sync.RWMutex
 	maxTag uint16
+	wlock []sync.Mutex
 )
 
 func init() {
@@ -55,10 +56,12 @@ func init() {
 	logWarn.SetLevel("warn")
 	idxMap = make(map[uint16]*os.File)
 	maxTag=11
+	wlock=make([]sync.Mutex,13)
 }
 
 func SetMaxTag(tag uint16){
 	maxTag=tag
+	wlock=make([]sync.Mutex,maxTag+2)
 }
 
 func NewTTLMap(){
@@ -550,10 +553,22 @@ func writeMDB(p *ParsedMDB) error {
 	}
 	idxLock.Unlock()
 	}
-
-    if _, err := f.WriteString(p.HashHex + "\n"); err != nil {
+	
+	tagLock:=int(p.Tag)
+	if tagLock >=65534 {
+		tagLock=-1
+	}
+    wlock[tagLock+1].Lock()
+	_, err := f.WriteString(p.HashHex + "\n")
+	wlock[tagLock+1].Unlock()
+	if err != nil {
         idxLock.Lock()
-		delete(idxMap,p.Tag)
+		f3,ok:=idxMap[p.Tag]
+		if ok {
+			if f==f3 {
+				delete(idxMap,p.Tag)
+			}
+		}
 		idxLock.Unlock()
 		f.Close()
 		return err
@@ -592,8 +607,21 @@ func appendSubIndex(tag uint16, parent, child string) error {
         return err
     }
     defer f.Close()
+	Num:=(fromHex(parent[0]) << 4) | fromHex(parent[1])
+	FdLock(Num)
     _, err = f.WriteString(child + ";")
+	FdUnlock(Num)
     return err
+}
+
+func fromHex(c byte) byte {
+    switch {
+    case '0' <= c && c <= '9':
+        return c - '0'
+    case 'a' <= c && c <= 'f':
+        return c - 'a' + 10
+    }
+    return 0
 }
 
 func IngestMDB(data []byte) error {
