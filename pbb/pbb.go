@@ -77,6 +77,19 @@ func (c *Cache) Load(input string) (interface{}, bool) {
     return c.m.Load(key)
 }
 
+func (c *Cache) Delete(input string) {
+	var h maphash.Hash
+	h.SetSeed(c.s)
+	h.WriteString(input)
+	key:=h.Sum64()
+	if key == 0 {
+		return
+	}
+	if _, ok := c.m.LoadAndDelete(key); ok {
+		c.size.Add(-1)
+	}
+}
+
 func (c *Cache) cleanup() {
     ok := c.lock.CompareAndSwap(false, true)
 	if !ok {

@@ -18,7 +18,7 @@ import (
 
 var (
     BaseDir   = "kep-data"
-    MaxTagNum = 512
+    MaxTagNum = 8192
 	log logger.Log_TYPE
 	is_init bool
 )
