@@ -169,7 +169,7 @@ func bytesToInt64(b []byte) int64 {
     return int64(t)
 }
 
-func parseAndVerify(data []byte) (*ParsedMDB, error) {
+func ParseAndVerify(data []byte) (*ParsedMDB, error) {
     r := bytes.NewReader(data)
 
     version,err := r.ReadByte() // version
@@ -521,7 +521,7 @@ func ensureDir(path string) error {
     return os.MkdirAll(path, 0755)
 }
 
-func writeMDB(p *ParsedMDB) error {
+func WriteMDB(p *ParsedMDB) error {
     dir := filepath.Join(BaseDir, strconv.Itoa(int(p.Tag)))
     if err := ensureDir(dir); err != nil {
         return err
@@ -577,7 +577,7 @@ func writeMDB(p *ParsedMDB) error {
     return nil
 }
 
-func appendSubIndex(tag uint16, parent, child string) error {
+func AppendSubIndex(tag uint16, parent, child string) error {
     root:=false
 	if parent == "" {
 		if child !="" {
@@ -624,18 +624,13 @@ func fromHex(c byte) byte {
     return 0
 }
 
-func IngestMDB(data []byte) error {
-
-    parsed, err := parseAndVerify(data)
-    if err != nil {
-        return err
-    }
-	err = writeMDB(parsed);
+func IngestMDB(parsed *ParsedMDB) error {
+	err := WriteMDB(parsed);
     if err != nil {
         return err
     }
 
-    if err := appendSubIndex(parsed.Tag, parsed.PointTo, parsed.HashHex); err != nil {
+    if err := AppendSubIndex(parsed.Tag, parsed.PointTo, parsed.HashHex); err != nil {
         return err
     }
 

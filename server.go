@@ -25,6 +25,7 @@ import (
 	"github.com/stalltrix/kep-demo/ntp"
 	"strconv"
 	"github.com/stalltrix/kep-demo/kepdb"
+	"github.com/stalltrix/kep-demo/limit"
 )
 
 type tokenLimiter struct {
@@ -144,17 +145,31 @@ func checkAndVeify_kep(msg []byte,token string){
 		}
 	}
 	
-	suffix, err := publicsuffix.EffectiveTLDPlusOne(string(domain))
+	domain_str:=string(domain)
+	public_suffix,_:= publicsuffix.PublicSuffix(domain_str)
+	suffix, err := publicsuffix.EffectiveTLDPlusOne(domain_str)
 	if err!=nil {
-		suffix=string(domain)
+		logInfo.Println("public_suffix err:",err)
+		return
 	}
 	deny_lock.RLock()
 	_,ok:=deny_Map[suffix]
+	_,ok2:=deny_Map[public_suffix]
 	deny_lock.RUnlock()
 	if ok {
-		logWarn.Println("drop deny user msg:",string(domain))
+		logWarn.Println("drop deny user msg:",domain_str)
 		return
 	}
+	if ok2 {
+		logWarn.Println("drop public_suffix msg:",domain_str)
+		return
+	}
+	
+	parsed, err := verify.ParseAndVerify(msg)
+    if err != nil {
+		logInfo.Println("resolv msg err:",err)
+        return
+    }
 	
 	limiter := getLimiter(suffix,true)
     if !limiter.Allow() {
@@ -171,11 +186,33 @@ func checkAndVeify_kep(msg []byte,token string){
 			logWarn.Println("INFO: drop private msg form",token)
 			return
 		}
+	} else {
+	if parsed.PointTo == "" {
+		limitNum:=limit.GetLimit("topic:"+suffix)
+		if limitNum > 10 {
+			logWarn.Println("WARN: topic Rate limit exceeded:", suffix)
+			return
+		}
+	} else {
+	  if tag==65534{
+		limitNum:=limit.GetLimit("chge:"+suffix)
+		if limitNum > 50 {
+			logWarn.Println("WARN: change Rate limit exceeded:", suffix)
+			return
+		}
+	  }else{
+		limitNum:=limit.GetLimit("reply:"+suffix)
+		if limitNum > 120 {
+			logWarn.Println("WARN: reply Rate limit exceeded:", suffix)
+			return
+		}
+	  }
 	}
+  }
 	
-	err = verify.IngestMDB(msg);
+	err = verify.IngestMDB(parsed);
 	if err != nil {
-		logErr.Println("resolv msg err:",err)
+		logErr.Println("ingest msg err:",err)
 		return
 	}
 	
