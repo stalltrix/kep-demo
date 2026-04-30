@@ -33,6 +33,12 @@ type tokenLimiter struct {
     lastUsed  int64
 }
 
+type customAPI struct {
+    code    int
+    ctype string
+    page       []byte
+}
+
 var (
     maxBodySize  = int64(1 << 17) // 128K
     readTimeout  = 60 * time.Second
@@ -53,6 +59,7 @@ var (
 	logArchive logger.Log_TYPE
 	custom_page404 []byte
 	custom_pageidx []byte
+	custom_api customAPI
 )
 
 func startLimiterCleaner() {
@@ -245,9 +252,7 @@ func handleMsg(msgType string, body []byte,token string) ([]byte, error) {
 
 func msgHandler(w http.ResponseWriter, r *http.Request) {
     if r.Method != http.MethodPost {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(404)
-		io.WriteString(w,`{"error":{"message":"Invalid URL (GET /v1/messages)","type":"invalid_request_error","param":"","code":""}}`)
+		custom404API(w,r)
         return
     }
 
@@ -257,7 +262,7 @@ func msgHandler(w http.ResponseWriter, r *http.Request) {
     auth := r.Header.Get("Authorization")
 	user_ip := r.Header.Get("CF-Connecting-IP")
     if !checkToken(auth,user_ip) {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		custom404API(w,r)
         return
     }
 
@@ -282,6 +287,18 @@ func msgHandler(w http.ResponseWriter, r *http.Request) {
 
     w.WriteHeader(http.StatusOK)
     w.Write(respMsg)
+}
+
+func custom404API(w http.ResponseWriter, r *http.Request) {
+	if custom_api.code == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(404)
+		io.WriteString(w,`{"error":{"message":"Invalid URL (`+r.Method+` /v1/messages)","type":"invalid_request_error","param":"","code":""}}`)
+		return
+	}
+	w.Header().Set("Content-Type", custom_api.ctype)
+	w.WriteHeader(custom_api.code)
+	w.Write(custom_api.page)
 }
 
 func idxHandler(w http.ResponseWriter, r *http.Request) {
@@ -366,6 +383,21 @@ func main() {
 			logger.Fatalln("Err: can't read custom fileIdx:",err)
 		}
 		logWarn.Println("init: set custom index page",cfg.CustomIdx)
+	}
+	if cfg.CustomAPI.HTTPCode != 0 {
+		if cfg.CustomAPI.HTTPCode <200 || cfg.CustomAPI.HTTPCode > 599 {
+			logger.Fatalln("Err: can't set custom http-code with:",cfg.CustomAPI.HTTPCode)
+		}
+		if cfg.CustomAPI.ContentType == "" {
+			logger.Fatalln("Err: can't set content-type null")
+		}
+		custom_api.code=cfg.CustomAPI.HTTPCode
+		custom_api.ctype=cfg.CustomAPI.ContentType
+		custom_api.page,err=os.ReadFile(cfg.CustomAPI.Pages_file)
+		if err != nil {
+			logger.Fatalln("Err: can't read custom api file:",err)
+		}
+		logWarn.Println("init: set custom api err page",cfg.CustomAPI.Pages_file)
 	}
 {
 	api := http.NewServeMux()

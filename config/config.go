@@ -11,6 +11,12 @@ type Neighbor struct {
 	RPM   int    `json:"rpm"`
 }
 
+type CustomData struct {
+    HTTPCode    int    `json:"http-code"`
+    ContentType string `json:"content-type"`
+    Pages_file       string `json:"resp_file"`
+}
+
 type Config struct {
 	ApiToken     string     `json:"api_token"`
 	Apiport     string     `json:"api_port"`
@@ -26,6 +32,7 @@ type Config struct {
 	Archive     string     `json:"archive"`
 	Crt  string     `json:"crt"`
 	Key  string     `json:"key"`
+	CustomAPI CustomData `json:"custom404"`
 }
 
 func Resolv(filename string) (Config,error) {

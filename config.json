@@ -1,15 +1,20 @@
 {
 	"api_token": "[your token]",
 	"listen": "127.0.0.1:8080",
-	"ntp":"",
-	"socks5":"",
-	"log_level":"info",
-	"local_token":"token0",
+	"ntp": "",
+	"socks5": "",
+	"log_level": "info",
+	"local_token": "token0",
 	"deny_file": "deny.json",
 	"token_file": "token.json",
 	"custom_fileIdx": "",
 	"custom_file404": "",
 	"archive": "",
 	"crt": "",
-	"key": ""
+	"key": "",
+	"custom404": {
+		"http-code": 404,
+		"content-type": "application/json",
+		"resp_file": "error.json"
+	}
 }
