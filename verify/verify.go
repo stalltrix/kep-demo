@@ -64,6 +64,25 @@ func SetMaxTag(tag uint16){
 	wlock=make([]sync.Mutex,maxTag+2)
 }
 
+func chkDir(){
+	for i:=0;i<int(maxTag)+1;i++{
+		dir := filepath.Join(BaseDir, strconv.Itoa(i))
+		if err := ensureDir(dir); err != nil {
+			logInfo.Println("check Dir fail:",err)
+		}
+	}
+	for i:=65534;i<65536;i++{
+		dir := filepath.Join(BaseDir, strconv.Itoa(i))
+		if err := ensureDir(dir); err != nil {
+			logInfo.Println("check Dir fail:",err)
+		}
+	}
+	dir := filepath.Join(BaseDir, "index")
+	if err := ensureDir(dir); err != nil {
+		logInfo.Println("check Dir fail:",err)
+	}
+}
+
 func NewTTLMap(){
 	exePath, err := os.Executable()
     if err == nil {
@@ -74,6 +93,7 @@ func NewTTLMap(){
 		 BaseDir = "kep-data"
 	}
 	logDebug.Println("debug: set database file",BaseDir)
+	chkDir()
 for {
 	time.Sleep(time.Second *60*60)
 	var newMap sync.Map
@@ -442,15 +462,6 @@ func ParseAndVerify(data []byte) (*ParsedMDB, error) {
 		if tagnum ==65534 {
 			return nil, errors.New("tag changed, invalid")
 		}
-		path := filepath.Join(
-			BaseDir,
-			"index",
-			parent+".txt",
-		)
-		f, err := os.Create(path)
-		if err == nil {
-			f.Close()
-		}
 	}
 	
 	if tagnum ==65534 || len(parent)>64{
@@ -523,9 +534,6 @@ func ensureDir(path string) error {
 
 func WriteMDB(p *ParsedMDB) error {
     dir := filepath.Join(BaseDir, strconv.Itoa(int(p.Tag)))
-    if err := ensureDir(dir); err != nil {
-        return err
-    }
 
     mdbPath := filepath.Join(dir, p.HashHex+".mdb")
     if err := os.WriteFile(mdbPath, p.Raw, 0644); err != nil {
@@ -586,7 +594,9 @@ func AppendSubIndex(tag uint16, parent, child string) error {
 		}else{
 			return nil
 		}
-    }
+    } else if len(parent)>64{
+		parent=parent[:64]
+	}
 
     path := filepath.Join(
         BaseDir,

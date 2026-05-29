@@ -200,7 +200,7 @@ func findFileByIndex(name string) (string,bool){
 	hexStr := strings.TrimSuffix(name, ".mdb")
 	b, err := hex.DecodeString(hexStr)
 	if err != nil {
-		log.Println("format hex err:",err)
+		log.Println(hexStr,"format hex err:",err)
 		return "",false
 	}
 	if len(b) != 32 {

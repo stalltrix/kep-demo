@@ -25,7 +25,7 @@ type MsgClient struct {
     httpCli   *http.Client
 }
 
-func NewMsgClient(url, token string) (*MsgClient,error) {
+func NewMsgClient(url, token string,skipSSLchk bool) (*MsgClient,error) {
 	var transport *http.Transport
 if val, ok := transport_Cache.Load(url); ok {
     transport = val.(*http.Transport)
@@ -40,6 +40,7 @@ if val, ok := transport_Cache.Load(url); ok {
                 tls.X25519,
                 tls.CurveP256,
             },
+			InsecureSkipVerify: skipSSLchk,
         },
     }
     val, _ := transport_Cache.LoadOrStore(url, newTr)

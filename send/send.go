@@ -74,7 +74,7 @@ func Nextmsg(msg []byte,self string) error {
 			logInfo.Println("skip fail neighbor url",nextloop[i].Addr)
 			continue;
 		}
-		client,err := NewMsgClient(nextloop[i].Addr, nextloop[i].Auth)
+		client,err := NewMsgClient(nextloop[i].Addr, nextloop[i].Auth,false)
 		if err !=nil {
 		logWarn.Println("Client init err",err)
 		continue;

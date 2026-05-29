@@ -209,7 +209,7 @@ func checkAndVeify_kep(msg []byte,token string){
 		}
 	  }else{
 		limitNum:=limit.GetLimit("reply:"+suffix)
-		if limitNum > 120 {
+		if limitNum > 100 {
 			logWarn.Println("WARN: reply Rate limit exceeded:", suffix)
 			return
 		}
