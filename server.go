@@ -26,6 +26,9 @@ import (
 	"strconv"
 	"github.com/stalltrix/kep-demo/kepdb"
 	"github.com/stalltrix/kep-demo/limit"
+	"github.com/stalltrix/kep-demo/psl"
+	"net/netip"
+	"path/filepath"
 )
 
 type tokenLimiter struct {
@@ -47,7 +50,7 @@ var (
 	token_Map sync.Map
 	nextroute []send.NextMsg
 	deny_Map map[string]bool
-	deny_lock sync.RWMutex
+	deny_lock sync.Mutex
 	limiterMap sync.Map
 	g_token string
 	Skip_token string
@@ -60,6 +63,7 @@ var (
 	custom_page404 []byte
 	custom_pageidx []byte
 	custom_api customAPI
+	skipSSLchk bool
 )
 
 func startLimiterCleaner() {
@@ -153,22 +157,36 @@ func checkAndVeify_kep(msg []byte,token string){
 	}
 	
 	domain_str:=string(domain)
-	public_suffix,_:= publicsuffix.PublicSuffix(domain_str)
 	suffix, err := publicsuffix.EffectiveTLDPlusOne(domain_str)
 	if err!=nil {
-		logInfo.Println("public_suffix err:",err)
+		logInfo.Println("public suffix err:",err)
 		return
 	}
-	deny_lock.RLock()
+	state,exist1:=psl.Check_psl(suffix)
+	if exist1 {
+		if state==1{
+			//suffix as psl
+			if psl.Check_allowN(domain_str) {suffix=domain_str;}
+		} else if state==2{
+			//suffix as one-psl
+			if psl.Check_allowOne(domain_str) {suffix=domain_str;}
+		} else if state==3{
+			//suffix remove psl
+			public_suffix,_:= publicsuffix.PublicSuffix(suffix)
+			suffix=public_suffix
+		} else if state==4{
+			//suffix overwrite 2+3
+			if psl.Check_allowOne(domain_str) {
+				suffix=domain_str
+			} else {
+				public_suffix,_:= publicsuffix.PublicSuffix(suffix)
+				suffix=public_suffix
+			}
+		}
+	}
 	_,ok:=deny_Map[suffix]
-	_,ok2:=deny_Map[public_suffix]
-	deny_lock.RUnlock()
 	if ok {
 		logWarn.Println("drop deny user msg:",domain_str)
-		return
-	}
-	if ok2 {
-		logWarn.Println("drop public_suffix msg:",domain_str)
 		return
 	}
 	
@@ -231,7 +249,7 @@ func checkAndVeify_kep(msg []byte,token string){
 	}
 	
 	logDebug.Println("debug: send msg to neighbor")
-	err = send.Nextmsg(msg,token)
+	err = send.Nextmsg(msg,token,skipSSLchk)
 	if err != nil {
 		logDebug.Println("send msg err:",err)
 	}
@@ -260,7 +278,36 @@ func msgHandler(w http.ResponseWriter, r *http.Request) {
     defer r.Body.Close()
 
     auth := r.Header.Get("Authorization")
+	
+	real_ip := r.RemoteAddr
+	if idx := strings.LastIndex(real_ip, ":"); idx != -1 {
+		real_ip = real_ip[:idx]
+		if len(real_ip)>2 && real_ip[0]=='[' && real_ip[len(real_ip)-1]==']' {
+			real_ip=real_ip[1:len(real_ip)-1]
+		}
+	}
+	
 	user_ip := r.Header.Get("CF-Connecting-IP")
+	if user_ip==""{
+		user_ip = r.Header.Get("X-Forwarded-For")
+		if idx := strings.Index(user_ip, ","); idx != -1 {
+			user_ip = user_ip[:idx]
+		}
+	}
+	if user_ip!="" {
+		if len(user_ip)>64{
+			user_ip="fake"
+		} else {
+		_,err:=netip.ParseAddr(user_ip)
+		if err != nil {
+			user_ip = "fake"
+		}
+		}
+		user_ip="-"+user_ip
+	}
+	
+	user_ip=real_ip+user_ip
+	
     if !checkToken(auth,user_ip) {
 		custom404API(w,r)
         return
@@ -318,10 +365,15 @@ func main() {
 	argc:=len(os.Args)
 	if argc <=1 {
 		logger.Print("usage:")
-		logger.Print("\tkepserver [config.json] [logfile]")
+		logger.Print("\tkep-edge [config.json] [logfile]")
 		return
 	}
 	cfg_file:=os.Args[1]
+	
+	if cfg_file=="-v" {
+		logger.Print("kep-edge: v0.3.0")
+		return
+	}
 	
 	
 	cfg,err := config.Resolv(cfg_file)
@@ -369,6 +421,30 @@ func main() {
 	if cfg.Ntp != "" {
 		ntp.Ntp_Init(cfg.Ntp)
 		logWarn.Println("start ntp client:",cfg.Ntp)
+	}
+	if cfg.Psl_Ext != "" {
+		err:=psl.Init_list(cfg.Psl_Ext)
+		if err != nil {
+			logger.Fatalln("Err: can't load PSL extend file:",err)
+		}
+		logWarn.Println("load PSL extend file:",cfg.Psl_Ext)
+	} else {
+		exePath, err := os.Executable()
+		if err == nil {
+			default_file:=filepath.Join(filepath.Dir(exePath), "kep_psl.txt")
+			_,err=os.Stat(default_file)
+			if err==nil{
+				err=psl.Init_list(default_file)
+				if err != nil {
+					logger.Fatalln("Err: can't load PSL extend file:",err)
+				}
+				logWarn.Println("load PSL extend file:",default_file)
+			}
+		}
+	}
+	if cfg.SkipSSLchk {
+		skipSSLchk=cfg.SkipSSLchk
+		logWarn.Println("Warn: skip SSL check: on")
 	}
 	if cfg.Custom404 != "" {
 		custom_page404, err = os.ReadFile(cfg.Custom404)
@@ -495,22 +571,70 @@ case "ban":{
 	suffix, err := publicsuffix.EffectiveTLDPlusOne(req)
 	if err!=nil {
 		suffix=req
+	} else {
+	state,exist1:=psl.Check_psl(suffix)
+	if exist1 {
+		if state==1{
+			//suffix as psl
+			if psl.Check_allowN(req) {suffix=req;}
+		} else if state==2{
+			//suffix as one-psl
+			if psl.Check_allowOne(req) {suffix=req;}
+		} else if state==3{
+			//suffix remove psl
+			public_suffix,_:= publicsuffix.PublicSuffix(suffix)
+			suffix=public_suffix
+		} else if state==4{
+			//suffix overwrite 2+3
+			if psl.Check_allowOne(req) {
+				suffix=req
+			} else {
+				public_suffix,_:= publicsuffix.PublicSuffix(suffix)
+				suffix=public_suffix
+			}
+		}
 	}
-    deny_lock.Lock()
-	deny_Map[suffix]=true
+	}
+	deny_lock.Lock()
+	deny_Map=changeMap(deny_Map,suffix,true)
 	deny_lock.Unlock()
-	w.Write([]byte("OK"))
+	w.Write([]byte("OK, domain suffix: '"+suffix+"' is banned"))
 }
 case "unban":{
 	suffix, err := publicsuffix.EffectiveTLDPlusOne(req)
 	if err!=nil {
 		suffix=req
+	} else {
+	state,exist1:=psl.Check_psl(suffix)
+	if exist1 {
+		if state==1{
+			//suffix as psl
+			if psl.Check_allowN(req) {suffix=req;}
+		} else if state==2{
+			//suffix as one-psl
+			if psl.Check_allowOne(req) {suffix=req;}
+		} else if state==3{
+			//suffix remove psl
+			public_suffix,_:= publicsuffix.PublicSuffix(suffix)
+			suffix=public_suffix
+		} else if state==4{
+			//suffix overwrite 2+3
+			if psl.Check_allowOne(req) {
+				suffix=req
+			} else {
+				public_suffix,_:= publicsuffix.PublicSuffix(suffix)
+				suffix=public_suffix
+			}
+		}
 	}
-    deny_lock.Lock()
+	}
 	_,ok:=deny_Map[suffix]
-	if ok {delete(deny_Map,suffix);}
+    if ok {
+	deny_lock.Lock()
+	deny_Map=changeMap(deny_Map,suffix,false)
 	deny_lock.Unlock()
-	w.Write([]byte("OK"))
+	}
+	w.Write([]byte("OK, domain suffix: '"+suffix+"' is unban"))
 }
 case "resend":{
 	if len(req) != 64 {
@@ -522,7 +646,7 @@ case "resend":{
 		w.Write([]byte("read data err:"+err.Error()))
 		return
 	}
-	err = send.Nextmsg(msg,Skip_token)
+	err = send.Nextmsg(msg,Skip_token,skipSSLchk)
 	if err != nil {
 		w.Write([]byte("resend data fail:"+err.Error()))
 		return
@@ -637,6 +761,7 @@ func loadToken(filename,next_spcks5 string) error {
 }
 
 func loadList(filename string) error {
+	deny_Map=make(map[string]bool)
     file, err := os.Open(filename)
     if err != nil {
         return err
@@ -657,9 +782,9 @@ func saveList(filename string) error {
 		return err
     }
     encoder := json.NewEncoder(file)
-	deny_lock.RLock()
+	deny_lock.Lock()
     err = encoder.Encode(deny_Map)
-	deny_lock.RUnlock()
+	deny_lock.Unlock()
 	file.Close()
     if err != nil {
         return err
@@ -679,4 +804,17 @@ for{
         logWarn.Println("save err:",err);
     }
 }
+}
+
+func changeMap(oldMap map[string]bool,key string,setadd bool) map[string]bool {
+	newMap := make(map[string]bool, len(oldMap))
+	for k:=range oldMap {
+		newMap[k]=true
+	}
+	if setadd {
+		newMap[key]=true
+	} else {
+		delete(newMap,key)
+	}
+	return newMap
 }

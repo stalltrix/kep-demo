@@ -12,6 +12,7 @@
 	"archive": "",
 	"crt": "",
 	"key": "",
+	"custom_psl": "",
 	"custom404": {
 		"http-code": 404,
 		"content-type": "application/json",

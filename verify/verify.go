@@ -55,8 +55,8 @@ func init() {
 	logInfo.SetLevel("info")
 	logWarn.SetLevel("warn")
 	idxMap = make(map[uint16]*os.File)
-	maxTag=11
-	wlock=make([]sync.Mutex,13)
+	maxTag=15
+	wlock=make([]sync.Mutex,17)
 }
 
 func SetMaxTag(tag uint16){

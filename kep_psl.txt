@@ -1,0 +1,17 @@
+# custom public suffix list
+
+# remove domain from public suffix list
+github.io,type=deny
+# *.github.io will be a general domain with .io, not as PSL .github.io
+
+# add domain to standalone TLDPlusOne
+sky.stalltrix.com,type=allow
+# sky.stalltrix.com will be standalone TLDPlusOne, but only for sky.stalltrix.com(one-zone), example:
+# 1. sky.stalltrix.com -> sky.stalltrix.com
+# 2. aaa.stalltrix.com,aa.sky.stalltrix.com,cc.bb.aa.sky.stalltrix.com -> stalltrix.com
+# 3. sky.example.com -> example.com
+
+# add domain to public suffix list
+*.ib.strx.win,type=allow
+# ib.strx.win will be public suffix list, but not include parent like aa.strx.win
+# this config will add multi-zone like aaa.ib.strx.win, bbb.ib.strx.win ,etc. but subDomains will not be included, like aaa.bbb.strx.win will be ignore.

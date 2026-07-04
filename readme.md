@@ -1,5 +1,23 @@
 # kep 参考实现程序
 
+#### 更新：2026/07/04
+
+0.3.0版本
+
+- 支持custom public suffix list(psl)
+- 支持跳过ssl验证
+- 扩展更多tag
+- 使用`-v`显示当前版本
+- PSL寻址优化
+
+使用`"custom_psl": "rule.txt"`可覆写psl，使用参考同目录`kep_psl.txt`
+
+<br>
+
+
+---
+
+
 #### 更新：2026/05/29
 
 0.2.9版本

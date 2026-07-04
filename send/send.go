@@ -60,7 +60,7 @@ func change_Packet(Msg []byte) []byte {
     return Msg
 }
 
-func Nextmsg(msg []byte,self string) error {
+func Nextmsg(msg []byte,self string,skipSSLchk bool) error {
 	newMsg:=change_Packet(msg)
 	if newMsg == nil {
 		return nil
@@ -74,7 +74,7 @@ func Nextmsg(msg []byte,self string) error {
 			logInfo.Println("skip fail neighbor url",nextloop[i].Addr)
 			continue;
 		}
-		client,err := NewMsgClient(nextloop[i].Addr, nextloop[i].Auth,false)
+		client,err := NewMsgClient(nextloop[i].Addr, nextloop[i].Auth,skipSSLchk)
 		if err !=nil {
 		logWarn.Println("Client init err",err)
 		continue;

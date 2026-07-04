@@ -32,6 +32,8 @@ type Config struct {
 	Archive     string     `json:"archive"`
 	Crt  string     `json:"crt"`
 	Key  string     `json:"key"`
+	SkipSSLchk bool `json:"skip_ssl_check"`
+	Psl_Ext string  `json:"custom_psl"`
 	CustomAPI CustomData `json:"custom404"`
 }
 
