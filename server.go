@@ -371,7 +371,7 @@ func main() {
 	cfg_file:=os.Args[1]
 	
 	if cfg_file=="-v" {
-		logger.Print("kep-edge: v0.3.0")
+		logger.Print("kep-edge: v0.3.1")
 		return
 	}
 	
@@ -398,6 +398,11 @@ func main() {
 	
 	if cfg.Listen == "" {
 	logger.Fatal("Listen addr is null")
+	}
+	
+	if cfg.SkipSSLchk {
+		skipSSLchk=cfg.SkipSSLchk
+		logWarn.Println("Warn: skip SSL check: on")
 	}
 	
 	if len(cfg.ApiToken) < 8 {
@@ -441,10 +446,6 @@ func main() {
 				logWarn.Println("load PSL extend file:",default_file)
 			}
 		}
-	}
-	if cfg.SkipSSLchk {
-		skipSSLchk=cfg.SkipSSLchk
-		logWarn.Println("Warn: skip SSL check: on")
 	}
 	if cfg.Custom404 != "" {
 		custom_page404, err = os.ReadFile(cfg.Custom404)
@@ -756,7 +757,7 @@ func loadToken(filename,next_spcks5 string) error {
         token_Map.Store(k, &val)
 		i++
     }
-	send.Send_Init(nextroute,next_spcks5)
+	send.Send_Init(nextroute,next_spcks5,skipSSLchk)
     return nil
 }
 

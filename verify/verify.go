@@ -118,7 +118,7 @@ func readExactly(r *bytes.Reader, n int) ([]byte,error) {
     return buf,nil
 }
 
-func desLookup(domain string) ([]uint64,error) {
+func DesLookup(domain string) ([]uint64,error) {
 	txtRecords, err := net.LookupTXT(domain)
     if err != nil {
         return nil,err
@@ -140,7 +140,7 @@ func desLookup(domain string) ([]uint64,error) {
 	return resp,nil
 }
 
-func dnsLookup(domain string) ([]byte,error) {
+func DnsLookup(domain string) ([]byte,error) {
 	txtRecords, err := net.LookupTXT(domain)
     if err != nil {
         return nil,err
@@ -301,7 +301,7 @@ func ParseAndVerify(data []byte) (*ParsedMDB, error) {
 		dns_cached=val.(*dnsCache)
 		mainPub=dns_cached.key
 	} else {
-		mainPub,err=dnsLookup(string(domain_str))
+		mainPub,err=DnsLookup(string(domain_str))
 		if err !=nil {
 			return nil, err
 		}
@@ -403,7 +403,7 @@ func ParseAndVerify(data []byte) (*ParsedMDB, error) {
     h.Write(pkey)
 	now_des:=h.Sum64()
 	if dns_cached.des==nil{
-		des_s,err:=desLookup(string(domain_str))
+		des_s,err:=DesLookup(string(domain_str))
 		if err!=nil {
 			return nil, err
 		}
@@ -424,7 +424,7 @@ func ParseAndVerify(data []byte) (*ParsedMDB, error) {
 		if dns_cached.lastcache+120 > now_time {
 			return nil, errors.New("pkey des not found in cache")
 		}else{
-			des_s,err:=desLookup(string(domain_str))
+			des_s,err:=DesLookup(string(domain_str))
 			if err!=nil {
 				return nil, err
 			}

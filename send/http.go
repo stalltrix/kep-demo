@@ -35,7 +35,7 @@ if val, ok := transport_Cache.Load(url); ok {
         MaxIdleConnsPerHost: 20,
         IdleConnTimeout:     90 * time.Second,
         TLSClientConfig: &tls.Config{
-            MinVersion: tls.VersionTLS13,
+            MinVersion: tls.VersionTLS12,
             CurvePreferences: []tls.CurveID{
                 tls.X25519,
                 tls.CurveP256,
@@ -43,10 +43,6 @@ if val, ok := transport_Cache.Load(url); ok {
 			InsecureSkipVerify: skipSSLchk,
         },
     }
-    val, _ := transport_Cache.LoadOrStore(url, newTr)
-    transport = val.(*http.Transport)
-}
-	
 	if proxyAddr != "" {
 		var auth *proxy.Auth
 		if len(socks_user) !=0 && len(socks_pass) !=0 {
@@ -59,8 +55,11 @@ if val, ok := transport_Cache.Load(url); ok {
 		if err != nil {
 			return nil,err
 		}
-		transport.Dial=dialer.Dial
+		newTr.Dial=dialer.Dial
 	}
+	val, _ := transport_Cache.LoadOrStore(url, newTr)
+    transport = val.(*http.Transport)
+}
 
     return &MsgClient{
         url:        url,
