@@ -9,6 +9,7 @@ import (
 	"time"
 	"errors"
 	"math"
+	"sync/atomic"
 )
 
 type NextMsg struct {
@@ -19,21 +20,28 @@ type NextMsg struct {
 type unaliveTables struct {
     failNum int
     wait int
+	auth string
 }
 
 type fullTables struct {
-    id int
+    addr string
     表 *unaliveTables
+}
+
+type stateTables struct {
+    black atomic.Bool
+	alive atomic.Bool
+    tm atomic.Int64
+	auth string
 }
 
 var (
 	nextloop []NextMsg
-	blacklist sync.Map
+	stateList sync.Map
 	ttl = time.Second*16
 	logDebug logger.Log_TYPE
 	logInfo logger.Log_TYPE
 	logWarn logger.Log_TYPE
-	alivelist sync.Map
 	globalSkipSSLchk bool
 	失效List sync.Map
 	检查中 sync.Map
@@ -46,24 +54,36 @@ func init() {
 	logWarn.SetLevel("warn")
 }
 
-func allow(addr string) bool {
-    v, ok := blacklist.Load(addr)
+func allowAndalive(addr string) (bool,bool) {
+    v, ok := stateList.Load(addr)
     if !ok {
-        return true
+        return true,false //allow,is_alive
     }
-
-    expire := v.(time.Time)
-    if time.Now().After(expire) {
-        blacklist.Delete(addr)
-        return true
-    }
-
-    return false
+	
+	状态:=v.(*stateTables)
+	
+	allowd:=!状态.black.Load()
+	alived:=状态.alive.Load()
+	
+	if !allowd {
+		expire := 状态.tm.Load()
+		if time.Now().Unix()>expire {
+			状态.black.Store(false)
+			allowd=true
+		}
+	}
+	
+    return allowd,alived
 }
 
-func fail(addr,auth string,i int) {
-	blacklist.Store(addr, time.Now().Add(ttl))
-	set_aliveFail(i)
+func fail(addr,auth string) {
+	v,ok:=stateList.Load(addr)
+	if ok {
+		状态:=v.(*stateTables)
+		状态.black.Store(true)
+		状态.tm.Store(time.Now().Add(ttl).Unix())
+	}
+	set_aliveFail(addr,auth)
 }
 
 func change_Packet(Msg []byte) []byte {
@@ -80,54 +100,44 @@ func change_Packet(Msg []byte) []byte {
     return Msg
 }
 
-func is_alive(id int) bool{
-	_,ok:= alivelist.Load(id)
-	return ok
-}
-
 func Maxwait(x int) int {
-	y := 599999*math.Exp(0.3*float64(-x))
+	y := 32700*math.Exp(0.3*float64(-x))
     z := 600000.0/(1 + y)
     return int(z)
 }
 
-func chk_alive(id int) error {
-	if len(nextloop) <= id||id<0 {
-		return strconv.ErrRange
-	}
-	err:=Ping(nextloop[id].Addr,nextloop[id].Auth,globalSkipSSLchk)
-	if err!=nil{
-		return err
-	}
-	return nil
+func chk_alive(addr,auth string) error {
+	return Ping(addr,auth,globalSkipSSLchk)
 }
 
-func set_aliveFail(id int){
+func set_aliveFail(addr,auth string){
 	now:=int(time.Now().Unix())
-	if v,loaded:=检查中.LoadOrStore(id,now);loaded {
+	if v,loaded:=检查中.LoadOrStore(addr,now);loaded {
 		lasttime:=v.(int)
 		if now-lasttime < 180 {
 			return
 		} else {
-			检查中.Store(id,now)
+			检查中.Store(addr,now)
 		}
 	}
 	time.AfterFunc(10*time.Second, func() {
-		if err:=chk_alive(id);err!=nil {
+		if err:=chk_alive(addr,auth);err!=nil {
 			time.AfterFunc(40*time.Second, func() {
-				if err:=chk_alive(id);err!=nil {
-					if _,ok:= alivelist.Load(id);ok{
-						alivelist.Delete(id)
-						失效List.Store(id,&unaliveTables{
+				if err:=chk_alive(addr,auth);err!=nil {
+					if v,ok:= stateList.Load(addr);ok{
+						状态:=v.(*stateTables)
+						状态.alive.Store(false)
+						失效List.Store(addr,&unaliveTables{
 							failNum: 0,
 							wait: 300,
+							auth: auth,
 						})
 					}
 				}
-				检查中.Delete(id)
+				检查中.Delete(addr)
 			})
 		} else {
-			检查中.Delete(id)
+			检查中.Delete(addr)
 		}
     })
 }
@@ -138,10 +148,10 @@ func recover_node(){
 	for range ticker.C {
 		var 全表 []fullTables
 		失效List.Range(func(k,v interface{}) bool {
-			id:=k.(int)
+			addr:=k.(string)
 			table:=v.(*unaliveTables)
 			全表=append(全表,fullTables{
-				id:id,
+				addr:addr,
 				表:table,
 			})
 			return true
@@ -149,18 +159,22 @@ func recover_node(){
 		
 		for _,sub:=range 全表 {
 			表:=sub.表
-			id:=sub.id
+			addr:=sub.addr
 			
 			表.wait-=120;
 			if 表.wait <=0 {
-				if err:=chk_alive(id);err!=nil {
-					if 表.failNum < 512 {
+				if err:=chk_alive(addr,表.auth);err!=nil {
+					if 表.failNum < 64 {
 						表.failNum++
 					}
 					表.wait=100+Maxwait(表.failNum)
 				} else {
-					alivelist.Store(id,struct{}{})
-					失效List.Delete(id)
+					失效List.Delete(addr)
+					v,ok:=stateList.Load(addr)
+					if ok {
+						状态:=v.(*stateTables)
+						状态.alive.Store(true)
+					}
 				}
 			}
 		}
@@ -169,31 +183,49 @@ func recover_node(){
 
 func auto_chk(){
 	for i:=range nextloop {
-		alivelist.Store(i,struct{}{})
+		if nextloop[i].Addr==""{
+			continue;
+		}
+		v,ok:=stateList.Load(nextloop[i].Addr)
+		if !ok {
+			v,_=stateList.LoadOrStore(nextloop[i].Addr,&stateTables{})
+		}
+		状态:=v.(*stateTables)
+		状态.alive.Store(true)
+		状态.auth=nextloop[i].Auth
 	}
 	ticker := time.NewTicker(30 * time.Minute)
     defer ticker.Stop()
 	
 	for i:=range nextloop {
-		err:=chk_alive(i)
+		if nextloop[i].Addr==""{
+			continue;
+		}
+		err:=chk_alive(nextloop[i].Addr,nextloop[i].Auth)
 		if err!=nil {
-			set_aliveFail(i)
+			set_aliveFail(nextloop[i].Addr,nextloop[i].Auth)
 			logDebug.Println("check alive fail:",err)
 		}
 	}
 	
     for range ticker.C {
-		var idlist []int
-        alivelist.Range(func(k,v interface{}) bool {
-			id:=k.(int)
-			idlist=append(idlist,id)
+		var NerList []NextMsg
+        stateList.Range(func(k,v interface{}) bool {
+			addr:=k.(string)
+			状态:=v.(*stateTables)
+			if 状态.alive.Load() {
+				NerList=append(NerList,NextMsg{
+					Addr:addr,
+					Auth:状态.auth,
+				})
+			}
 			return true
 		})
 		
-		for _,v:=range idlist {
-			err:=chk_alive(v)
+		for _,v:=range NerList {
+			err:=chk_alive(v.Addr,v.Auth)
 			if err!=nil {
-				set_aliveFail(v)
+				set_aliveFail(v.Addr,v.Auth)
 				logDebug.Println("check alive fail:",err)
 			}
 		}
@@ -221,19 +253,23 @@ func Nextmsg(msg []byte,self string,skipSSLchk bool) error {
 		return nil
 	}
 	success:=0
-	for i:=range nextloop {
-		if self==nextloop[i].Auth{
+	for _,svc:=range nextloop {
+		if svc.Addr==""{
 			continue;
 		}
-		if !is_alive(i) {
-			logDebug.Println("skip unreachable neighbor",nextloop[i].Addr)
+		if self==svc.Auth{
 			continue;
 		}
-		if !allow(nextloop[i].Addr) {
-			logInfo.Println("skip fail neighbor url",nextloop[i].Addr)
+		allow,alive:=allowAndalive(svc.Addr)
+		if !alive {
+			logDebug.Println("skip unreachable neighbor",svc.Addr)
 			continue;
 		}
-		client,err := NewMsgClient(nextloop[i].Addr, nextloop[i].Auth,skipSSLchk)
+		if !allow {
+			logInfo.Println("skip fail neighbor url",svc.Addr)
+			continue;
+		}
+		client,err := NewMsgClient(svc.Addr, svc.Auth,skipSSLchk)
 		if err !=nil {
 		logWarn.Println("Client init err",err)
 		continue;
@@ -241,15 +277,15 @@ func Nextmsg(msg []byte,self string,skipSSLchk bool) error {
 		body,err:=client.Send("data", newMsg)
 		if err !=nil {
 		logWarn.Println("send err",err)
-		fail(nextloop[i].Addr,nextloop[i].Auth,i)
+		fail(svc.Addr,svc.Auth)
 		continue;
 		}
 		if string(body)!="+OK"{
 		logWarn.Println("send err with resp")
-		fail(nextloop[i].Addr,nextloop[i].Auth,i)
+		fail(svc.Addr,svc.Auth)
 		continue;
 		}
-		logDebug.Println("send to",nextloop[i].Addr)
+		logDebug.Println("send to",svc.Addr)
 		success++
 	}
 	if success == 0 {
@@ -295,19 +331,33 @@ func Send_Init(nextServer []NextMsg,socks5addr string,skipSSLchk bool) {
 }
 
 func Append(addr,token string) {
+	if addr==""{
+		return
+	}
 	new_next :=NextMsg{
 		Addr: addr,
 		Auth: token,
 	}
 	nextloop=append(nextloop,new_next)
+	
+	v,ok:=stateList.Load(addr)
+	if !ok {
+		v,_=stateList.LoadOrStore(addr,&stateTables{})
+	}
+	状态:=v.(*stateTables)
+	状态.alive.Store(true)
+	状态.auth=token
 }
 
 func Remove(token string) {
-	res := nextloop[:0]
+	var res []NextMsg
     for _, v := range nextloop {
         if v.Auth != token {
             res = append(res, v)
-        }
+        } else {
+			stateList.Delete(v.Addr)
+			失效List.Delete(v.Addr)
+		}
     }
 	nextloop=res
     return
