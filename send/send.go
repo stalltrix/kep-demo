@@ -29,7 +29,7 @@ type fullTables struct {
 }
 
 type stateTables struct {
-    black atomic.Bool
+    black atomic.Int32
 	alive atomic.Bool
     tm atomic.Int64
 	auth string
@@ -38,7 +38,7 @@ type stateTables struct {
 var (
 	nextloop []NextMsg
 	stateList sync.Map
-	ttl = time.Second*16
+	ttl = time.Second*30
 	logDebug logger.Log_TYPE
 	logInfo logger.Log_TYPE
 	logWarn logger.Log_TYPE
@@ -62,13 +62,13 @@ func allowAndalive(addr string) (bool,bool) {
 	
 	状态:=v.(*stateTables)
 	
-	allowd:=!状态.black.Load()
+	allowd:=状态.black.Load()<2
 	alived:=状态.alive.Load()
 	
 	if !allowd {
 		expire := 状态.tm.Load()
 		if time.Now().Unix()>expire {
-			状态.black.Store(false)
+			状态.black.Store(0)
 			allowd=true
 		}
 	}
@@ -80,10 +80,20 @@ func fail(addr,auth string) {
 	v,ok:=stateList.Load(addr)
 	if ok {
 		状态:=v.(*stateTables)
-		状态.black.Store(true)
+		状态.black.Add(1)
 		状态.tm.Store(time.Now().Add(ttl).Unix())
 	}
 	set_aliveFail(addr,auth)
+}
+
+func succeed(addr string){
+	v,ok:=stateList.Load(addr)
+	if ok {
+		状态:=v.(*stateTables)
+		if 状态.black.Load()!=0 {
+			状态.black.Store(0)
+		}
+	}
 }
 
 func change_Packet(Msg []byte) []byte {
@@ -285,6 +295,7 @@ func Nextmsg(msg []byte,self string,skipSSLchk bool) error {
 		fail(svc.Addr,svc.Auth)
 		continue;
 		}
+		succeed(svc.Addr)
 		logDebug.Println("send to",svc.Addr)
 		success++
 	}
