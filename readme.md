@@ -1,5 +1,38 @@
 # kep 参考实现程序
 
+<details>
+<summary>config最小配置示例</summary>
+
+```json
+{
+	"api_token": "[set your api_token]",
+	"listen": "127.0.0.1:8080",
+	"local_token": "[set your local_token]",
+	"ntp": "time.cloudflare.com",
+	"deny_file": "deny.json",
+	"token_file": "token.json"
+}
+
+```
+
+</details>
+
+<br>
+
+
+---
+
+#### 更新：2026/07/21
+
+0.3.1版本
+
+- 支持邻居节点自动熔断与健康检查
+
+<br>
+
+
+---
+
 #### 更新：2026/07/04
 
 0.3.0版本
