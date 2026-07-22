@@ -35,6 +35,7 @@ type Config struct {
 	SkipSSLchk bool `json:"skip_ssl_check"`
 	Psl_Ext string  `json:"custom_psl"`
 	CustomAPI CustomData `json:"custom404"`
+	CustomDNS string `json:"custom_dns"`
 }
 
 func Resolv(filename string) (Config,error) {

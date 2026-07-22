@@ -427,6 +427,10 @@ func main() {
 		ntp.Ntp_Init(cfg.Ntp)
 		logWarn.Println("start ntp client:",cfg.Ntp)
 	}
+	if cfg.CustomDNS != "" {
+		logWarn.Println("set dns server:",cfg.CustomDNS)
+		verify.SET_DNS_SERVER(cfg.CustomDNS)
+	}
 	if cfg.Psl_Ext != "" {
 		err:=psl.Init_list(cfg.Psl_Ext)
 		if err != nil {

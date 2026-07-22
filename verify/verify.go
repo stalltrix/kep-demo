@@ -11,7 +11,6 @@ import (
     "github.com/stalltrix/kep-demo/logger"
     "os"
     "path/filepath"
-	"net"
 	"encoding/base32"
 	"sync"
 	"time"
@@ -119,7 +118,7 @@ func readExactly(r *bytes.Reader, n int) ([]byte,error) {
 }
 
 func DesLookup(domain string) ([]uint64,error) {
-	txtRecords, err := net.LookupTXT(domain)
+	txtRecords, err := NSLookupTXT(domain)
     if err != nil {
         return nil,err
     }
@@ -141,7 +140,7 @@ func DesLookup(domain string) ([]uint64,error) {
 }
 
 func DnsLookup(domain string) ([]byte,error) {
-	txtRecords, err := net.LookupTXT(domain)
+	txtRecords, err := NSLookupTXT(domain)
     if err != nil {
         return nil,err
     }
