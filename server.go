@@ -371,7 +371,7 @@ func main() {
 	cfg_file:=os.Args[1]
 	
 	if cfg_file=="-v" {
-		logger.Print("kep-edge: v0.3.1")
+		logger.Print("kep-edge: v0.3.2")
 		return
 	}
 	
@@ -429,7 +429,10 @@ func main() {
 	}
 	if cfg.CustomDNS != "" {
 		logWarn.Println("set dns server:",cfg.CustomDNS)
-		verify.SET_DNS_SERVER(cfg.CustomDNS)
+		err=verify.SET_DNS_SERVER(cfg.CustomDNS)
+		if err != nil {
+			logger.Fatalln("Err: set dns server:",err)
+		}
 	}
 	if cfg.Psl_Ext != "" {
 		err:=psl.Init_list(cfg.Psl_Ext)

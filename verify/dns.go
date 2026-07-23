@@ -1,13 +1,15 @@
 package verify
 
 import (
-    "net"
+    "os"
+	"net"
 	"time"
 	"errors"
 	"context"
 	"strings"
 	"net/url"
 	"net/http"
+	"sync/atomic"
 	"encoding/json"
 )
 
@@ -23,6 +25,12 @@ type DoHResponse struct {
     Answer []DoHAnswer `json:"Answer"`
 }
 
+type _localDNS struct {
+    dnsRecord map[string][]string
+    lastupdate int64
+	lasttime int64
+}
+
 const dnsTypeTXT = 16
 
 var (
@@ -30,6 +38,9 @@ var (
 	ErrServer = errors.New("dns server bad status")
 	ErrFormat = errors.New("dns server format err")
 	ErrNull = errors.New("no txt record")
+	localDNS _localDNS
+	localAndDNS bool
+	lock     atomic.Bool
 )
 
 var client = &http.Client{
@@ -93,6 +104,21 @@ func NSLookupTXT(domain string)([]string, error){
 			return nil, ErrNull
 		}
 		return txts, nil
+	} else if strings.HasPrefix(custom_dns,"local:"){
+		if localDNS.lastupdate+300 < time.Now().Unix() {
+			err:=update_localDNS(strings.TrimPrefix(custom_dns,"local:"))
+			if err!=nil {
+				return nil,err
+			}
+		}
+		txts,ok:=localDNS.dnsRecord[domain]
+		if !ok {
+			if !localAndDNS {
+				return nil,ErrNull
+			}
+			return net.LookupTXT(domain)
+		}
+		return txts,nil
 	}
 	
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -100,8 +126,70 @@ func NSLookupTXT(domain string)([]string, error){
 	return userDNS.LookupTXT(ctx,domain)
 }
 
+func update_localDNS(localfile string) error {
+	ok := lock.CompareAndSwap(false, true)
+	if !ok {
+		return nil
+	}
+	defer lock.Store(false)
+	info, err := os.Stat(localfile)
+	if err !=nil {
+		return err
+	}
+	lasttime:=info.ModTime().Unix()
+	if localDNS.lasttime==lasttime {
+		localDNS.lastupdate=time.Now().Unix()
+		return nil
+	}
+	localDNS.lasttime=lasttime
+	data, err := os.ReadFile(localfile)
+    if err != nil {
+        return err
+    }
+	str1:= strings.ReplaceAll(string(data), "\r", "")
+	str1= strings.ReplaceAll(str1, "\t", " ")
+	lines := strings.Split(str1,"\n")
+	newRecord:=make(map[string][]string)
+	for _, line := range lines {
+		if strings.HasPrefix(line,"#"){
+			continue
+		}
+		p := strings.SplitN(line, " ", 2)
+		if len(p)!=2 {
+			continue
+		}
+		p[1]=strings.TrimSpace(p[1])
+		v,ok:=newRecord[p[0]]
+		if !ok {
+			newRecord[p[0]]=[]string{p[1]}
+			continue
+		}
+		v=append(v,p[1])
+		newRecord[p[0]]=v
+	}
+	localDNS.dnsRecord=newRecord
+	localDNS.lastupdate=time.Now().Unix()
+	return nil
+}
+
 func SET_DNS_SERVER(addr string) error {
 	if addr=="" {
+		return nil
+	}
+	if strings.HasPrefix(addr,"local:")||strings.HasPrefix(addr,"local+dns:"){
+		var files string
+		if strings.HasPrefix(addr,"local:") {
+			files=strings.TrimPrefix(addr,"local:")
+			localAndDNS=false
+		} else {
+			files=strings.TrimPrefix(addr,"local+dns:")
+			localAndDNS=true
+		}
+		err:=update_localDNS(files)
+		if err!=nil {
+			return err
+		}
+		custom_dns="local:"+files
 		return nil
 	}
 	if strings.HasPrefix(addr,"http://")||strings.HasPrefix(addr,"https://"){
