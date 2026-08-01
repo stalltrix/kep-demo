@@ -46,6 +46,8 @@ var (
 	失效List sync.Map
 	检查中 sync.Map
 	后台chk sync.Once
+	Custom_userAgent string
+	Custom_header map[string]string
 )
 
 func init() {
@@ -247,6 +249,12 @@ func Ping(addr,auth string,skipSSLchk bool) error {
 	if err !=nil {
 		return err
 	}
+	if Custom_userAgent!=""{
+		client.UserAgent=Custom_userAgent
+	}
+	if len(Custom_header)>0{
+		client.Headers=Custom_header
+	}
 	body,err:=client.Send("ping", nil)
 	if err !=nil {
 		return err
@@ -283,6 +291,12 @@ func Nextmsg(msg []byte,self string,skipSSLchk bool) error {
 		if err !=nil {
 		logWarn.Println("Client init err",err)
 		continue;
+		}
+		if Custom_userAgent!=""{
+			client.UserAgent=Custom_userAgent
+		}
+		if len(Custom_header)>0{
+			client.Headers=Custom_header
 		}
 		body,err:=client.Send("data", newMsg)
 		if err !=nil {

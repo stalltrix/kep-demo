@@ -22,6 +22,8 @@ var (
 type MsgClient struct {
     url        string
     authToken string
+	UserAgent string
+	Headers map[string]string
     httpCli   *http.Client
 }
 
@@ -84,6 +86,14 @@ func (c *MsgClient) Send(msgType string, msg []byte) ([]byte, error) {
     req.Header.Set("Content-Type", "application/octet-stream")
     req.Header.Set("Authorization", "Bearer "+c.authToken)
     req.Header.Set("X-Msg-Type", msgType)
+	if c.UserAgent!=""{
+		req.Header.Set("User-Agent", c.UserAgent)
+	}
+	if len(c.Headers)>0 {
+		for k, v := range c.Headers {
+			req.Header.Set(k, v)
+		}
+	}
 
     resp, err := c.httpCli.Do(req)
     if err != nil {

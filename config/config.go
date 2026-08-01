@@ -36,6 +36,8 @@ type Config struct {
 	Psl_Ext string  `json:"custom_psl"`
 	CustomAPI CustomData `json:"custom404"`
 	CustomDNS string `json:"custom_dns"`
+	UserAgent string `json:"user_agent"`
+	CustomHeader map[string]string `json:"custom_header"`
 }
 
 func Resolv(filename string) (Config,error) {

@@ -434,6 +434,12 @@ func main() {
 			logger.Fatalln("Err: set dns server:",err)
 		}
 	}
+	if cfg.UserAgent != "" {
+		send.Custom_userAgent=strings.TrimSpace(cfg.UserAgent)
+	}
+	if len(cfg.CustomHeader)>0{
+		send.Custom_header=cfg.CustomHeader
+	}
 	if cfg.Psl_Ext != "" {
 		err:=psl.Init_list(cfg.Psl_Ext)
 		if err != nil {
